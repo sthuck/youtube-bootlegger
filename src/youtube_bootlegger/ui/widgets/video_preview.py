@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 )
 
 from ...core.video_info import VideoInfo
+from ..theme import ThemeColors
 
 
 class VideoPreviewWidget(QWidget):
@@ -26,19 +27,20 @@ class VideoPreviewWidget(QWidget):
         self._network_manager = QNetworkAccessManager(self)
         self._network_manager.finished.connect(self._on_thumbnail_loaded)
         self._current_info: VideoInfo | None = None
+        self._theme = ThemeColors()
         self._setup_ui()
         self.hide()
 
     def _setup_ui(self) -> None:
         self._frame = QFrame()
         self._frame.setFrameStyle(QFrame.Shape.StyledPanel | QFrame.Shadow.Raised)
-        self._frame.setStyleSheet("""
-            QFrame {
-                background-color: #f5f5f5;
-                border: 1px solid #ddd;
+        self._frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {self._theme.preview_bg};
+                border: 1px solid {self._theme.preview_border};
                 border-radius: 8px;
                 padding: 10px;
-            }
+            }}
         """)
 
         frame_layout = QHBoxLayout(self._frame)
@@ -47,11 +49,12 @@ class VideoPreviewWidget(QWidget):
 
         self._thumbnail_label = QLabel()
         self._thumbnail_label.setFixedSize(self.THUMBNAIL_WIDTH, self.THUMBNAIL_HEIGHT)
-        self._thumbnail_label.setStyleSheet("""
-            QLabel {
-                background-color: #333;
+        self._thumbnail_label.setStyleSheet(f"""
+            QLabel {{
+                background-color: {self._theme.thumbnail_bg};
                 border-radius: 4px;
-            }
+                color: {self._theme.text_muted};
+            }}
         """)
         self._thumbnail_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         frame_layout.addWidget(self._thumbnail_label)
@@ -62,22 +65,22 @@ class VideoPreviewWidget(QWidget):
         self._title_label = QLabel()
         self._title_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self._title_label.setWordWrap(True)
-        self._title_label.setStyleSheet("""
-            QLabel {
+        self._title_label.setStyleSheet(f"""
+            QLabel {{
                 font-weight: bold;
                 font-size: 14px;
-                color: #333;
-            }
+                color: {self._theme.text_primary};
+            }}
         """)
         details_layout.addWidget(self._title_label)
 
         self._channel_label = QLabel()
         self._channel_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self._channel_label.setStyleSheet("""
-            QLabel {
-                color: #666;
+        self._channel_label.setStyleSheet(f"""
+            QLabel {{
+                color: {self._theme.text_secondary};
                 font-size: 12px;
-            }
+            }}
         """)
         details_layout.addWidget(self._channel_label)
 
@@ -85,29 +88,29 @@ class VideoPreviewWidget(QWidget):
         info_row.setSpacing(15)
 
         self._duration_label = QLabel()
-        self._duration_label.setStyleSheet("""
-            QLabel {
-                color: #444;
+        self._duration_label.setStyleSheet(f"""
+            QLabel {{
+                color: {self._theme.text_secondary};
                 font-size: 12px;
-            }
+            }}
         """)
         info_row.addWidget(self._duration_label)
 
         self._views_label = QLabel()
-        self._views_label.setStyleSheet("""
-            QLabel {
-                color: #444;
+        self._views_label.setStyleSheet(f"""
+            QLabel {{
+                color: {self._theme.text_secondary};
                 font-size: 12px;
-            }
+            }}
         """)
         info_row.addWidget(self._views_label)
 
         self._date_label = QLabel()
-        self._date_label.setStyleSheet("""
-            QLabel {
-                color: #444;
+        self._date_label.setStyleSheet(f"""
+            QLabel {{
+                color: {self._theme.text_secondary};
                 font-size: 12px;
-            }
+            }}
         """)
         info_row.addWidget(self._date_label)
 
@@ -123,6 +126,17 @@ class VideoPreviewWidget(QWidget):
 
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
 
+    def _get_title_style(self, error: bool = False) -> str:
+        """Get title label stylesheet."""
+        color = self._theme.error_text if error else self._theme.text_primary
+        return f"""
+            QLabel {{
+                font-weight: bold;
+                font-size: 14px;
+                color: {color};
+            }}
+        """
+
     def set_video_info(self, info: VideoInfo) -> None:
         """Display video information.
 
@@ -130,6 +144,7 @@ class VideoPreviewWidget(QWidget):
             info: VideoInfo object with video details.
         """
         self._current_info = info
+        self._title_label.setStyleSheet(self._get_title_style())
 
         title = info.title
         if len(title) > 80:
@@ -151,6 +166,7 @@ class VideoPreviewWidget(QWidget):
 
     def set_loading(self) -> None:
         """Show loading state."""
+        self._title_label.setStyleSheet(self._get_title_style())
         self._title_label.setText("Loading video info...")
         self._channel_label.setText("")
         self._duration_label.setText("")
@@ -167,13 +183,7 @@ class VideoPreviewWidget(QWidget):
             message: Error message to display.
         """
         self._title_label.setText(f"Error: {message}")
-        self._title_label.setStyleSheet("""
-            QLabel {
-                font-weight: bold;
-                font-size: 14px;
-                color: #c00;
-            }
-        """)
+        self._title_label.setStyleSheet(self._get_title_style(error=True))
         self._channel_label.setText("")
         self._duration_label.setText("")
         self._views_label.setText("")
@@ -186,13 +196,7 @@ class VideoPreviewWidget(QWidget):
         """Clear the preview and hide."""
         self._current_info = None
         self._title_label.setText("")
-        self._title_label.setStyleSheet("""
-            QLabel {
-                font-weight: bold;
-                font-size: 14px;
-                color: #333;
-            }
-        """)
+        self._title_label.setStyleSheet(self._get_title_style())
         self._channel_label.setText("")
         self._duration_label.setText("")
         self._views_label.setText("")

@@ -20,6 +20,7 @@ from ...core import (
     preview_parse,
     validate_template,
 )
+from ..theme import ThemeColors
 
 
 class TracklistInputWidget(QWidget):
@@ -38,6 +39,7 @@ Final Song - 12:47"""
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
+        self._theme = ThemeColors()
         self._setup_ui()
         self._connect_signals()
         self._update_preview()
@@ -58,7 +60,9 @@ Final Song - 12:47"""
         placeholders_label = QLabel(
             "Placeholders: %songname%, %hh%, %mm%, %ss%"
         )
-        placeholders_label.setStyleSheet("color: #666; font-size: 11px;")
+        placeholders_label.setStyleSheet(
+            f"color: {self._theme.text_secondary}; font-size: 11px;"
+        )
         template_header.addWidget(placeholders_label)
         template_header.addStretch()
 
@@ -70,7 +74,9 @@ Final Song - 12:47"""
         template_layout.addWidget(self._template_input)
 
         self._template_error = QLabel()
-        self._template_error.setStyleSheet("color: red; font-size: 11px;")
+        self._template_error.setStyleSheet(
+            f"color: {self._theme.error_text}; font-size: 11px;"
+        )
         self._template_error.hide()
         template_layout.addWidget(self._template_error)
 
@@ -111,12 +117,12 @@ Final Song - 12:47"""
         self._preview_frame.setFrameStyle(
             QFrame.Shape.StyledPanel | QFrame.Shadow.Sunken
         )
-        self._preview_frame.setStyleSheet("""
-            QFrame {
-                background-color: #fafafa;
-                border: 1px solid #ddd;
+        self._preview_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {self._theme.input_bg};
+                border: 1px solid {self._theme.input_border};
                 border-radius: 4px;
-            }
+            }}
         """)
 
         preview_frame_layout = QVBoxLayout(self._preview_frame)
@@ -151,7 +157,7 @@ Final Song - 12:47"""
         layout.addLayout(input_preview_layout)
 
         self._error_label = QLabel()
-        self._error_label.setStyleSheet("color: red;")
+        self._error_label.setStyleSheet(f"color: {self._theme.error_text};")
         self._error_label.setWordWrap(True)
         self._error_label.hide()
         layout.addWidget(self._error_label)
@@ -194,18 +200,24 @@ Final Song - 12:47"""
             self._status_label.setText("")
             self._status_label.setStyleSheet("font-size: 11px;")
             placeholder = QLabel("Enter tracks to see preview")
-            placeholder.setStyleSheet("color: #999; font-style: italic;")
+            placeholder.setStyleSheet(
+                f"color: {self._theme.text_muted}; font-style: italic;"
+            )
             self._preview_layout.insertWidget(0, placeholder)
             return
 
         if preview.is_valid:
             self._status_label.setText(f"{preview.total_lines} tracks")
-            self._status_label.setStyleSheet("color: green; font-size: 11px;")
+            self._status_label.setStyleSheet(
+                f"color: {self._theme.success_text}; font-size: 11px;"
+            )
         else:
             self._status_label.setText(
                 f"{preview.error_count} error(s)"
             )
-            self._status_label.setStyleSheet("color: red; font-size: 11px;")
+            self._status_label.setStyleSheet(
+                f"color: {self._theme.error_text}; font-size: 11px;"
+            )
 
         for i, track in enumerate(preview.tracks):
             track_widget = self._create_track_preview_widget(i + 1, track)
@@ -221,7 +233,9 @@ Final Song - 12:47"""
 
         index_label = QLabel(f"{index:02d}.")
         index_label.setFixedWidth(25)
-        index_label.setStyleSheet("color: #666; font-size: 11px;")
+        index_label.setStyleSheet(
+            f"color: {self._theme.text_secondary}; font-size: 11px;"
+        )
         layout.addWidget(index_label)
 
         time_label = QLabel(track.timestamp)
@@ -237,9 +251,13 @@ Final Song - 12:47"""
         layout.addWidget(name_label)
 
         if track.is_valid:
-            widget.setStyleSheet("background-color: #e8f5e9; border-radius: 3px;")
+            widget.setStyleSheet(
+                f"background-color: {self._theme.success_bg}; border-radius: 3px;"
+            )
         else:
-            widget.setStyleSheet("background-color: #ffebee; border-radius: 3px;")
+            widget.setStyleSheet(
+                f"background-color: {self._theme.error_bg}; border-radius: 3px;"
+            )
             name_label.setToolTip(track.error or "Parse error")
 
         return widget
