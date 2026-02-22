@@ -15,6 +15,9 @@ youtube-bootlegger = "youtube_bootlegger.app:run"
 
 [dependency-groups]
 dev = [
+    "nuitka>=4.0.1",
+    "pip>=26.0.1",
+    "pyinstaller>=6.19.0",
     "pytest>=8.0.0",
 ]
 
