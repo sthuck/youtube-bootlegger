@@ -15,14 +15,22 @@ class DownloadSplitPipeline:
     def __init__(
         self,
         progress_callback: Callable[[str, float, str], None] | None = None,
+        log_callback: Callable[[str], None] | None = None,
     ):
         """Initialize the pipeline.
 
         Args:
             progress_callback: Callback for progress (stage, percent, message).
+            log_callback: Callback for log messages.
         """
         self._progress_callback = progress_callback
+        self._log_callback = log_callback
         self._cancelled = False
+
+    def _log(self, message: str) -> None:
+        """Emit a log message."""
+        if self._log_callback:
+            self._log_callback(message)
 
     def execute(self, job: DownloadJob) -> list[Path]:
         """Execute full pipeline.
@@ -45,6 +53,7 @@ class DownloadSplitPipeline:
             downloader = AudioDownloader(
                 output_dir=temp_dir,
                 progress_callback=self._on_download_progress,
+                log_callback=self._log,
             )
 
             audio_file = downloader.download(job.url)
@@ -56,6 +65,7 @@ class DownloadSplitPipeline:
 
             splitter = AudioSplitter(
                 progress_callback=self._on_split_progress,
+                log_callback=self._log,
             )
 
             output_files = splitter.split(

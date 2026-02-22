@@ -41,23 +41,3 @@ def format_seconds_to_timestamp(seconds: float) -> str:
     minutes = int((seconds % 3600) // 60)
     secs = seconds % 60
     return f"{hours:02d}:{minutes:02d}:{secs:06.3f}"
-
-
-def format_duration_human(seconds: float) -> str:
-    """Format duration for human display.
-
-    Args:
-        seconds: Duration in seconds.
-
-    Returns:
-        Human-readable duration string (e.g., '3m 42s').
-    """
-    if seconds < 60:
-        return f"{int(seconds)}s"
-    minutes = int(seconds // 60)
-    secs = int(seconds % 60)
-    if minutes < 60:
-        return f"{minutes}m {secs}s"
-    hours = minutes // 60
-    mins = minutes % 60
-    return f"{hours}h {mins}m {secs}s"

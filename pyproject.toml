@@ -12,5 +12,14 @@ dependencies = [
 [project.scripts]
 youtube-bootlegger = "youtube_bootlegger.app:run"
 
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+]
+
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

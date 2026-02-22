@@ -16,16 +16,24 @@ class AudioDownloader:
         self,
         output_dir: Path | None = None,
         progress_callback: Callable[[float, str], None] | None = None,
+        log_callback: Callable[[str], None] | None = None,
     ):
         """Initialize the downloader.
 
         Args:
             output_dir: Directory to save downloaded audio. Uses temp dir if None.
             progress_callback: Callback for progress updates (percent, status).
+            log_callback: Callback for log messages.
         """
         self._output_dir = output_dir or Path(tempfile.gettempdir())
         self._progress_callback = progress_callback
+        self._log_callback = log_callback
         self._last_percent = 0.0
+
+    def _log(self, message: str) -> None:
+        """Emit a log message."""
+        if self._log_callback:
+            self._log_callback(message)
 
     def download(self, url: str) -> Path:
         """Download audio from YouTube URL.
@@ -40,6 +48,8 @@ class AudioDownloader:
             DownloadError: If the download fails.
         """
         output_template = str(self._output_dir / "%(title)s.%(ext)s")
+
+        self._log(f"Download directory: {self._output_dir}")
 
         ydl_opts = {
             "format": "bestaudio/best",
@@ -68,6 +78,7 @@ class AudioDownloader:
                 if not audio_path.exists():
                     raise DownloadError(f"Downloaded file not found: {audio_path}")
 
+                self._log(f"Downloaded to: {audio_path}")
                 return audio_path
 
         except yt_dlp.utils.DownloadError as e:

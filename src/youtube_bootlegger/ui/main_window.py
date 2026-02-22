@@ -1,6 +1,6 @@
 """Main application window."""
 
-from PySide6.QtCore import QThreadPool
+from PySide6.QtCore import QThreadPool, QTimer
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QMainWindow,
@@ -10,25 +10,33 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..core import parse_tracklist
+from ..core import parse_tracklist_with_template
 from ..models import DownloadJob
-from ..utils import is_ffmpeg_available
-from ..workers import PipelineWorker
+from ..utils import is_ffmpeg_available, is_valid_youtube_url
+from ..workers import PipelineWorker, VideoInfoWorker
 from .widgets import (
     DirectoryPickerWidget,
     ProgressPanelWidget,
     TracklistInputWidget,
     UrlInputWidget,
+    VideoPreviewWidget,
 )
 
 
 class MainWindow(QMainWindow):
     """Main application window."""
 
+    URL_DEBOUNCE_MS = 500
+
     def __init__(self):
         super().__init__()
         self._thread_pool = QThreadPool()
         self._current_worker: PipelineWorker | None = None
+        self._video_info_worker: VideoInfoWorker | None = None
+        self._url_debounce_timer = QTimer()
+        self._url_debounce_timer.setSingleShot(True)
+        self._url_debounce_timer.timeout.connect(self._fetch_video_info)
+        self._last_fetched_url = ""
         self._setup_ui()
         self._connect_signals()
         self._check_ffmpeg()
@@ -36,7 +44,7 @@ class MainWindow(QMainWindow):
     def _setup_ui(self) -> None:
         """Initialize and layout all UI components."""
         self.setWindowTitle("YouTube Bootlegger")
-        self.setMinimumSize(600, 500)
+        self.setMinimumSize(700, 600)
 
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -47,6 +55,9 @@ class MainWindow(QMainWindow):
 
         self._url_input = UrlInputWidget()
         layout.addWidget(self._url_input)
+
+        self._video_preview = VideoPreviewWidget()
+        layout.addWidget(self._video_preview)
 
         self._tracklist_input = TracklistInputWidget()
         layout.addWidget(self._tracklist_input)
@@ -75,6 +86,7 @@ class MainWindow(QMainWindow):
         """Connect widget signals to slots."""
         self._start_button.clicked.connect(self._on_start_clicked)
         self._cancel_button.clicked.connect(self._on_cancel_clicked)
+        self._url_input.url_changed.connect(self._on_url_changed)
 
     def _check_ffmpeg(self) -> None:
         """Check if ffmpeg is available."""
@@ -89,6 +101,52 @@ class MainWindow(QMainWindow):
                 "On Windows: Download from ffmpeg.org",
             )
 
+    def _on_url_changed(self, url: str) -> None:
+        """Handle URL input changes with debouncing."""
+        self._url_debounce_timer.stop()
+
+        if not url:
+            self._video_preview.clear()
+            self._last_fetched_url = ""
+            return
+
+        if not is_valid_youtube_url(url):
+            self._video_preview.clear()
+            return
+
+        if url == self._last_fetched_url:
+            return
+
+        self._url_debounce_timer.start(self.URL_DEBOUNCE_MS)
+
+    def _fetch_video_info(self) -> None:
+        """Fetch video info for the current URL."""
+        url = self._url_input.get_url()
+
+        if not url or not is_valid_youtube_url(url):
+            return
+
+        if url == self._last_fetched_url:
+            return
+
+        self._last_fetched_url = url
+        self._video_preview.set_loading()
+
+        self._video_info_worker = VideoInfoWorker(url)
+        self._video_info_worker.signals.finished.connect(self._on_video_info_loaded)
+        self._video_info_worker.signals.error.connect(self._on_video_info_error)
+
+        self._thread_pool.start(self._video_info_worker)
+
+    def _on_video_info_loaded(self, info) -> None:
+        """Handle successful video info fetch."""
+        self._video_preview.set_video_info(info)
+
+    def _on_video_info_error(self, message: str) -> None:
+        """Handle video info fetch error."""
+        self._video_preview.set_error(message)
+        self._url_input.set_error(message)
+
     def _on_start_clicked(self) -> None:
         """Validate inputs and start pipeline worker."""
         self._clear_errors()
@@ -96,6 +154,11 @@ class MainWindow(QMainWindow):
         url_valid, url_error = self._url_input.validate()
         if not url_valid:
             self._url_input.set_error(url_error)
+            return
+
+        video_info = self._video_preview.get_video_info()
+        if video_info is None:
+            self._url_input.set_error("Please wait for video info to load")
             return
 
         tracks_valid, tracks_error = self._tracklist_input.validate()
@@ -108,7 +171,10 @@ class MainWindow(QMainWindow):
             self._directory_picker.set_error(dir_error)
             return
 
-        tracks = parse_tracklist(self._tracklist_input.get_text())
+        tracks = parse_tracklist_with_template(
+            self._tracklist_input.get_text(),
+            self._tracklist_input.get_template(),
+        )
         job = DownloadJob(
             url=self._url_input.get_url(),
             output_dir=self._directory_picker.get_directory(),
@@ -127,6 +193,7 @@ class MainWindow(QMainWindow):
         self._current_worker = PipelineWorker(job)
         self._current_worker.signals.started.connect(self._on_worker_started)
         self._current_worker.signals.progress.connect(self._on_progress)
+        self._current_worker.signals.log.connect(self._on_log)
         self._current_worker.signals.finished.connect(self._on_finished)
         self._current_worker.signals.error.connect(self._on_error)
 
@@ -153,6 +220,10 @@ class MainWindow(QMainWindow):
         self._progress_panel.set_stage(f"{stage_display}: {int(percent)}%")
         self._progress_panel.set_progress(percent)
         self._progress_panel.add_message(message, "info")
+
+    def _on_log(self, message: str) -> None:
+        """Handle log messages from pipeline."""
+        self._progress_panel.add_message(message, "debug")
 
     def _on_finished(self, output_files: list) -> None:
         """Handle successful completion."""

@@ -29,6 +29,7 @@ class PipelineWorker(QRunnable):
         try:
             self._pipeline = DownloadSplitPipeline(
                 progress_callback=self._on_progress,
+                log_callback=self._on_log,
             )
 
             output_files = self._pipeline.execute(self.job)
@@ -48,3 +49,7 @@ class PipelineWorker(QRunnable):
     def _on_progress(self, stage: str, percent: float, message: str) -> None:
         """Forward progress to signal."""
         self.signals.progress.emit(stage, percent, message)
+
+    def _on_log(self, message: str) -> None:
+        """Forward log message to signal."""
+        self.signals.log.emit(message)

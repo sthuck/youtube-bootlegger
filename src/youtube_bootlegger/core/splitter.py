@@ -15,13 +15,21 @@ class AudioSplitter:
     def __init__(
         self,
         progress_callback: Callable[[int, int, str], None] | None = None,
+        log_callback: Callable[[str], None] | None = None,
     ):
         """Initialize the splitter.
 
         Args:
             progress_callback: Callback for progress (current, total, track_name).
+            log_callback: Callback for log messages.
         """
         self._progress_callback = progress_callback
+        self._log_callback = log_callback
+
+    def _log(self, message: str) -> None:
+        """Emit a log message."""
+        if self._log_callback:
+            self._log_callback(message)
 
     def split(
         self,
@@ -111,6 +119,8 @@ class AudioSplitter:
             str(output_file),
         ])
 
+        self._log(f"Running: {' '.join(cmd)}")
+
         try:
             result = subprocess.run(
                 cmd,
@@ -123,6 +133,8 @@ class AudioSplitter:
                 raise SplitError(
                     f"FFmpeg failed for '{track.name}': {result.stderr}"
                 )
+
+            self._log(f"Created: {output_file}")
 
         except subprocess.TimeoutExpired as e:
             raise SplitError(f"FFmpeg timed out for '{track.name}'") from e

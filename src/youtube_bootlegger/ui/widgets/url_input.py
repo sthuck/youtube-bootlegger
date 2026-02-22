@@ -1,5 +1,6 @@
 """YouTube URL input widget."""
 
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QLabel, QLineEdit, QVBoxLayout, QWidget
 
 from ...utils import is_valid_youtube_url
@@ -8,9 +9,12 @@ from ...utils import is_valid_youtube_url
 class UrlInputWidget(QWidget):
     """Widget for YouTube URL input with validation."""
 
+    url_changed = Signal(str)
+
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self._setup_ui()
+        self._input.textChanged.connect(self._on_text_changed)
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -61,3 +65,8 @@ class UrlInputWidget(QWidget):
     def set_enabled(self, enabled: bool) -> None:
         """Enable or disable the input."""
         self._input.setEnabled(enabled)
+
+    def _on_text_changed(self, text: str) -> None:
+        """Handle text changes and emit url_changed signal."""
+        self.clear_error()
+        self.url_changed.emit(text.strip())
