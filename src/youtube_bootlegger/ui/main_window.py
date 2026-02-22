@@ -16,6 +16,7 @@ from ..utils import is_ffmpeg_available, is_valid_youtube_url
 from ..workers import PipelineWorker, VideoInfoWorker
 from .widgets import (
     DirectoryPickerWidget,
+    MetadataInputWidget,
     ProgressPanelWidget,
     TracklistInputWidget,
     UrlInputWidget,
@@ -60,8 +61,10 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._video_preview)
 
         self._tracklist_input = TracklistInputWidget()
-        # self._tracklist_input.setMinimumHeight(200)
         layout.addWidget(self._tracklist_input)
+
+        self._metadata_input = MetadataInputWidget()
+        layout.addWidget(self._metadata_input)
 
         self._directory_picker = DirectoryPickerWidget()
         layout.addWidget(self._directory_picker)
@@ -142,6 +145,8 @@ class MainWindow(QMainWindow):
     def _on_video_info_loaded(self, info) -> None:
         """Handle successful video info fetch."""
         self._video_preview.set_video_info(info)
+        # Set default album name to video title
+        self._metadata_input.set_album_placeholder(info.title)
 
     def _on_video_info_error(self, message: str) -> None:
         """Handle video info fetch error."""
@@ -176,10 +181,18 @@ class MainWindow(QMainWindow):
             self._tracklist_input.get_text(),
             self._tracklist_input.get_template(),
         )
+
+        # Get metadata - album defaults to video title if not specified
+        artist = self._metadata_input.get_artist() or None
+        album = self._metadata_input.get_album() or video_info.title
+
         job = DownloadJob(
             url=self._url_input.get_url(),
             output_dir=self._directory_picker.get_directory(),
             tracks=tuple(tracks),
+            artist=artist,
+            album=album,
+            thumbnail_url=video_info.thumbnail_url,
         )
 
         self._start_pipeline(job)
@@ -215,6 +228,7 @@ class MainWindow(QMainWindow):
         stage_display = {
             "download": "Downloading",
             "split": "Splitting",
+            "tagging": "Tagging",
             "complete": "Complete",
         }.get(stage, stage.title())
 
@@ -261,6 +275,7 @@ class MainWindow(QMainWindow):
         """Enable/disable UI during processing."""
         self._url_input.set_enabled(not busy)
         self._tracklist_input.set_enabled(not busy)
+        self._metadata_input.set_enabled(not busy)
         self._directory_picker.set_enabled(not busy)
         self._start_button.setEnabled(not busy)
         self._cancel_button.setEnabled(busy)

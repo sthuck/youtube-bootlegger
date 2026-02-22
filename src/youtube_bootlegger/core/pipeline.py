@@ -1,12 +1,14 @@
 """Download and split pipeline orchestration."""
 
 import tempfile
+import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 
 from ..models import DownloadJob
 from .downloader import AudioDownloader
 from .splitter import AudioSplitter
+from .tagger import tag_audio_files
 
 
 class DownloadSplitPipeline:
@@ -75,6 +77,13 @@ class DownloadSplitPipeline:
                 audio_format=job.audio_format,
             )
 
+            if self._cancelled:
+                return []
+
+            # Apply metadata tags
+            self._emit_progress("tagging", 0, "Applying metadata tags...")
+            self._apply_tags(output_files, job)
+
             self._emit_progress("complete", 100, "Complete!")
             return output_files
 
@@ -99,6 +108,60 @@ class DownloadSplitPipeline:
         percent = (current / total) * 100
         message = f"Splitting track {current}/{total}: {track_name}"
         self._emit_progress("split", percent, message)
+
+    def _apply_tags(self, output_files: list[Path], job: DownloadJob) -> None:
+        """Apply metadata tags to output files.
+
+        Args:
+            output_files: List of output audio files.
+            job: The download job with metadata.
+        """
+        if not output_files:
+            return
+
+        # Get track names in order
+        track_names = [track.name for track in job.tracks]
+
+        # Download cover art from thumbnail URL
+        cover_art = None
+        cover_mime_type = "image/jpeg"
+
+        if job.thumbnail_url:
+            self._log(f"Downloading cover art from: {job.thumbnail_url}")
+            cover_art, cover_mime_type = self._download_cover_art(job.thumbnail_url)
+
+        try:
+            tag_audio_files(
+                files=output_files,
+                track_names=track_names,
+                artist=job.artist,
+                album=job.album,
+                cover_art=cover_art,
+                cover_mime_type=cover_mime_type,
+                audio_format=job.audio_format,
+            )
+            self._log(f"Applied metadata tags to {len(output_files)} files")
+            self._emit_progress("tagging", 100, "Metadata tags applied")
+        except ValueError as e:
+            self._log(f"Warning: Could not apply tags: {e}")
+
+    def _download_cover_art(self, url: str) -> tuple[bytes | None, str]:
+        """Download cover art from URL.
+
+        Args:
+            url: URL to download from.
+
+        Returns:
+            Tuple of (image_data, mime_type).
+        """
+        try:
+            with urllib.request.urlopen(url, timeout=10) as response:
+                data = response.read()
+                content_type = response.headers.get("Content-Type", "image/jpeg")
+                return data, content_type
+        except Exception as e:
+            self._log(f"Warning: Could not download cover art: {e}")
+            return None, "image/jpeg"
 
     def _cleanup_temp(self, temp_dir: Path) -> None:
         """Clean up temporary files."""

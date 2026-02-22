@@ -5,6 +5,7 @@ description = "Download and split YouTube live performance audio into individual
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "mutagen>=1.47.0",
     "pyside6>=6.10.2",
     "yt-dlp>=2026.2.21",
 ]
