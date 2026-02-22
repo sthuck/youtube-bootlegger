@@ -65,6 +65,9 @@ class DownloadSplitPipeline:
 
             self._emit_progress("split", 0, "Starting split...")
 
+            # Create output subdirectory based on artist/album
+            output_dir = self._create_output_dir(job)
+
             splitter = AudioSplitter(
                 progress_callback=self._on_split_progress,
                 log_callback=self._log,
@@ -72,7 +75,7 @@ class DownloadSplitPipeline:
 
             output_files = splitter.split(
                 input_file=audio_file,
-                output_dir=job.output_dir,
+                output_dir=output_dir,
                 tracks=list(job.tracks),
                 audio_format=job.audio_format,
             )
@@ -108,6 +111,51 @@ class DownloadSplitPipeline:
         percent = (current / total) * 100
         message = f"Splitting track {current}/{total}: {track_name}"
         self._emit_progress("split", percent, message)
+
+    def _create_output_dir(self, job: DownloadJob) -> Path:
+        """Create output subdirectory based on artist and album.
+
+        Creates a directory named "Artist - Album" or just "Album" if no artist.
+
+        Args:
+            job: The download job with metadata.
+
+        Returns:
+            Path to the output directory.
+        """
+        # Build directory name from artist and album
+        if job.artist and job.album:
+            dir_name = f"{job.artist} - {job.album}"
+        elif job.album:
+            dir_name = job.album
+        else:
+            dir_name = "Unknown Album"
+
+        # Sanitize directory name (remove invalid characters)
+        dir_name = self._sanitize_filename(dir_name)
+
+        output_dir = job.output_dir / dir_name
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        self._log(f"Output directory: {output_dir}")
+        return output_dir
+
+    def _sanitize_filename(self, name: str) -> str:
+        """Remove or replace characters invalid for filenames.
+
+        Args:
+            name: The filename to sanitize.
+
+        Returns:
+            Sanitized filename.
+        """
+        # Characters not allowed in filenames on various OS
+        invalid_chars = '<>:"/\\|?*'
+        for char in invalid_chars:
+            name = name.replace(char, "_")
+        # Remove leading/trailing whitespace and dots
+        name = name.strip(". ")
+        return name or "Unknown"
 
     def _apply_tags(self, output_files: list[Path], job: DownloadJob) -> None:
         """Apply metadata tags to output files.
