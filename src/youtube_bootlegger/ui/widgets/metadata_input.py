@@ -22,40 +22,29 @@ class MetadataInputWidget(QWidget):
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(10)
+        layout.setSpacing(8)
 
-        header = QLabel("Metadata (for MP3 tags):")
+        header = QLabel("Metadata:")
         header.setStyleSheet("font-weight: bold;")
         layout.addWidget(header)
 
-        fields_layout = QHBoxLayout()
-        fields_layout.setSpacing(15)
-
         # Artist input
-        artist_layout = QVBoxLayout()
         artist_label = QLabel("Artist:")
         artist_label.setStyleSheet(f"color: {self._theme.text_secondary}; font-size: 12px;")
-        artist_layout.addWidget(artist_label)
+        layout.addWidget(artist_label)
 
         self._artist_input = QLineEdit()
         self._artist_input.setPlaceholderText("Enter artist name")
-        artist_layout.addWidget(self._artist_input)
-
-        fields_layout.addLayout(artist_layout, 1)
+        layout.addWidget(self._artist_input)
 
         # Album input
-        album_layout = QVBoxLayout()
         album_label = QLabel("Album:")
         album_label.setStyleSheet(f"color: {self._theme.text_secondary}; font-size: 12px;")
-        album_layout.addWidget(album_label)
+        layout.addWidget(album_label)
 
         self._album_input = QLineEdit()
         self._album_input.setPlaceholderText("Defaults to video title")
-        album_layout.addWidget(self._album_input)
-
-        fields_layout.addLayout(album_layout, 1)
-
-        layout.addLayout(fields_layout)
+        layout.addWidget(self._album_input)
 
     def get_artist(self) -> str:
         """Return the artist name."""

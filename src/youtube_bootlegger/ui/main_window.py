@@ -45,46 +45,58 @@ class MainWindow(QMainWindow):
     def _setup_ui(self) -> None:
         """Initialize and layout all UI components."""
         self.setWindowTitle("YouTube Bootlegger")
-        self.setMinimumSize(700, 800)
+        self.setMinimumSize(1000, 700)
 
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
 
-        layout = QVBoxLayout(central_widget)
-        layout.setSpacing(15)
-        layout.setContentsMargins(20, 20, 20, 20)
+        main_layout = QHBoxLayout(central_widget)
+        main_layout.setSpacing(20)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+
+        # Left column (wider) - Video input and tracklist
+        left_column = QVBoxLayout()
+        left_column.setSpacing(15)
 
         self._url_input = UrlInputWidget()
-        layout.addWidget(self._url_input)
+        left_column.addWidget(self._url_input)
 
         self._video_preview = VideoPreviewWidget()
-        layout.addWidget(self._video_preview)
+        left_column.addWidget(self._video_preview)
 
         self._tracklist_input = TracklistInputWidget()
-        layout.addWidget(self._tracklist_input)
+        left_column.addWidget(self._tracklist_input, 1)  # Expand to fill
+
+        main_layout.addLayout(left_column, 3)  # Wider column
+
+        # Right column (smaller) - Settings and controls
+        right_column = QVBoxLayout()
+        right_column.setSpacing(15)
 
         self._metadata_input = MetadataInputWidget()
-        layout.addWidget(self._metadata_input)
+        right_column.addWidget(self._metadata_input)
 
         self._directory_picker = DirectoryPickerWidget()
-        layout.addWidget(self._directory_picker)
+        right_column.addWidget(self._directory_picker)
 
         self._progress_panel = ProgressPanelWidget()
-        layout.addWidget(self._progress_panel)
+        right_column.addWidget(self._progress_panel, 1)  # Expand to fill
 
-        button_layout = QHBoxLayout()
-        button_layout.addStretch()
+        # Buttons
+        button_layout = QVBoxLayout()
+        button_layout.setSpacing(8)
 
         self._start_button = QPushButton("Start Download && Split")
-        self._start_button.setMinimumWidth(200)
+        self._start_button.setMinimumHeight(40)
         button_layout.addWidget(self._start_button)
 
         self._cancel_button = QPushButton("Cancel")
         self._cancel_button.setEnabled(False)
         button_layout.addWidget(self._cancel_button)
 
-        button_layout.addStretch()
-        layout.addLayout(button_layout)
+        right_column.addLayout(button_layout)
+
+        main_layout.addLayout(right_column, 2)  # Narrower column
 
     def _connect_signals(self) -> None:
         """Connect widget signals to slots."""
