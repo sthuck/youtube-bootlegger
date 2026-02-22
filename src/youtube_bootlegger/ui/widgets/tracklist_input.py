@@ -58,7 +58,7 @@ Final Song - 12:47"""
         template_header.addWidget(template_label)
 
         placeholders_label = QLabel(
-            "Placeholders: %songname%, %hh%, %mm%, %ss%"
+            "Placeholders: %songname%, %hh%, %mm%, %ss%, %ignore:regex%"
         )
         placeholders_label.setStyleSheet(
             f"color: {self._theme.text_secondary}; font-size: 11px;"

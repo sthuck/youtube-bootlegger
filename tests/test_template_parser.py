@@ -420,3 +420,123 @@ class TestEdgeCases:
         text = "\n".join(lines)
         tracks = parse_tracklist_with_template(text, DEFAULT_TEMPLATE)
         assert len(tracks) == 100
+
+
+class TestIgnorePlaceholder:
+    """Tests for %ignore:regex% placeholder."""
+
+    def test_ignore_simple_number(self):
+        """Ignore a simple number prefix."""
+        template = r"%ignore:\d+\.% %songname% - %mm%:%ss%"
+        result = parse_line("1. My Song - 3:45", template, 1)
+        assert result.name == "My Song"
+        assert result.minutes == 3
+        assert result.seconds == 45
+
+    def test_ignore_double_digit_number(self):
+        """Ignore double digit number prefix."""
+        template = r"%ignore:\d+\.% %songname% - %mm%:%ss%"
+        result = parse_line("10. Another Song - 5:30", template, 1)
+        assert result.name == "Another Song"
+        assert result.minutes == 5
+
+    def test_ignore_bracket_number(self):
+        """Ignore bracketed number prefix."""
+        template = r"%ignore:\[\d+\]% %songname% - %mm%:%ss%"
+        result = parse_line("[5] Cool Track - 2:15", template, 1)
+        assert result.name == "Cool Track"
+
+    def test_ignore_at_end(self):
+        """Ignore pattern at end of line."""
+        template = r"%songname% - %mm%:%ss%%ignore:\s*#\d+%"
+        result = parse_line("Test Song - 1:30 #42", template, 1)
+        assert result.name == "Test Song"
+
+    def test_multiple_ignore_patterns(self):
+        """Multiple ignore patterns in template."""
+        template = r"%ignore:\d+\.% %songname% - %mm%:%ss%%ignore:\s*\[.*\]%"
+        result = parse_line("3. Great Song - 4:00 [live]", template, 1)
+        assert result.name == "Great Song"
+        assert result.minutes == 4
+
+    def test_ignore_with_hours(self):
+        """Ignore pattern with hours template."""
+        template = r"%ignore:\d+\.% %songname% - %hh%:%mm%:%ss%"
+        result = parse_line("7. Long Track - 1:23:45", template, 1)
+        assert result.name == "Long Track"
+        assert result.hours == 1
+        assert result.minutes == 23
+        assert result.seconds == 45
+
+    def test_validate_template_with_valid_ignore(self):
+        """Template with valid ignore pattern should validate."""
+        template = r"%ignore:\d+\.% %songname% - %mm%:%ss%"
+        result = validate_template(template)
+        assert result.is_valid is True
+
+    def test_validate_template_with_invalid_ignore_regex(self):
+        """Template with invalid ignore regex should fail validation."""
+        template = r"%ignore:[unclosed% %songname% - %mm%:%ss%"
+        result = validate_template(template)
+        assert result.is_valid is False
+        assert "regex" in result.error.lower() or "invalid" in result.error.lower()
+
+    def test_ignore_empty_match(self):
+        """Ignore pattern that matches empty string."""
+        template = r"%ignore:\d*%%songname% - %mm%:%ss%"
+        # Should work with no number prefix (since \d* matches empty)
+        result = parse_line("Test - 1:00", template, 1)
+        assert result.name == "Test"
+        # Also works with number prefix
+        result2 = parse_line("5Test - 2:00", template, 1)
+        assert result2.name == "Test"
+
+    def test_parse_tracklist_with_ignore(self):
+        """Parse full tracklist with ignore pattern."""
+        template = r"%ignore:\d+\.\s*% %songname% - %mm%:%ss%"
+        text = """1. First Song - 0:00
+2. Second Song - 3:30
+3. Third Song - 7:15"""
+        tracks = parse_tracklist_with_template(text, template)
+        assert len(tracks) == 3
+        assert tracks[0].name == "First Song"
+        assert tracks[1].name == "Second Song"
+        assert tracks[2].name == "Third Song"
+
+    def test_preview_with_ignore(self):
+        """Preview parsing with ignore pattern."""
+        template = r"%ignore:\d+\.% %songname% - %mm%:%ss%"
+        text = "1. My Track - 2:30"
+        result = preview_parse(text, template)
+        assert result.is_valid is True
+        assert result.tracks[0].name == "My Track"
+
+    def test_ignore_optional_pattern(self):
+        """Ignore pattern with optional component."""
+        template = r"%ignore:(?:\d+\.\s*)?%%songname% - %mm%:%ss%"
+        # With number prefix
+        result1 = parse_line("5. Song A - 1:00", template, 1)
+        assert result1.name == "Song A"
+        # Without number prefix
+        result2 = parse_line("Song B - 2:00", template, 1)
+        assert result2.name == "Song B"
+
+    def test_ignore_word_pattern(self):
+        """Ignore a word pattern."""
+        template = r"%ignore:Track\s*%%songname% - %mm%:%ss%"
+        result = parse_line("Track My Song - 3:00", template, 1)
+        assert result.name == "My Song"
+
+    def test_ignore_preserves_special_chars_in_template(self):
+        """Template literal characters should still be escaped."""
+        template = r"%ignore:\d+\.% [%songname%] - %mm%:%ss%"
+        result = parse_line("1. [Cool Track] - 1:30", template, 1)
+        assert result.name == "Cool Track"
+
+    def test_multiple_ignore_different_positions(self):
+        """Multiple ignore patterns in different positions."""
+        template = r"%ignore:>>% %mm%:%ss% %songname%%ignore:<<\s*%"
+        result = parse_line(">> 4:30 My Song<<  ", template, 1)
+        assert result.name == "My Song"
+        assert result.minutes == 4
+        assert result.seconds == 30

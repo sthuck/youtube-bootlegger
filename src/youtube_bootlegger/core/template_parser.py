@@ -4,12 +4,14 @@ Supports templates like:
 - %songname% - %mm%:%ss%
 - %hh%:%mm%:%ss% - %songname%
 - [%mm%:%ss%] %songname%
+- %ignore:\\d+\\.% %songname% - %mm%:%ss%
 
 Placeholders:
 - %songname% - The song name (required)
 - %hh% - Hours (optional, 0 if not present)
 - %mm% - Minutes (required)
 - %ss% - Seconds (required)
+- %ignore:regex% - Match and ignore pattern (can use multiple)
 """
 
 import re
@@ -28,6 +30,9 @@ PLACEHOLDER_PATTERNS = {
 }
 
 REQUIRED_PLACEHOLDERS = {"%songname%", "%mm%", "%ss%"}
+
+# Pattern to match %ignore:...% placeholders in templates
+IGNORE_PATTERN = re.compile(r"%ignore:(.+?)%")
 
 
 @dataclass(frozen=True)
@@ -83,6 +88,17 @@ def validate_template(template: str) -> TemplateValidation:
             missing_placeholders=tuple(sorted(missing)),
         )
 
+    # Validate ignore patterns have valid regex
+    for match in IGNORE_PATTERN.finditer(template):
+        ignore_regex = match.group(1)
+        try:
+            re.compile(ignore_regex)
+        except re.error as e:
+            return TemplateValidation(
+                is_valid=False,
+                error=f"Invalid regex in %ignore:{ignore_regex}%: {e}",
+            )
+
     try:
         _compile_template(template)
     except re.error as e:
@@ -103,11 +119,28 @@ def _compile_template(template: str) -> re.Pattern:
     Returns:
         Compiled regex pattern.
     """
+    # First, extract and replace ignore patterns before escaping
+    # We need to handle them specially since they contain user regex
+    ignore_replacements: list[tuple[str, str]] = []
+    for match in IGNORE_PATTERN.finditer(template):
+        full_match = match.group(0)  # e.g., %ignore:\d+\.%
+        ignore_regex = match.group(1)  # e.g., \d+\.
+        # Create non-capturing group for the ignore pattern
+        replacement = f"(?:{ignore_regex})"
+        ignore_replacements.append((full_match, replacement))
+
+    # Escape the template for regex
     pattern = re.escape(template)
 
+    # Replace standard placeholders
     for placeholder, regex in PLACEHOLDER_PATTERNS.items():
         escaped_placeholder = re.escape(placeholder)
         pattern = pattern.replace(escaped_placeholder, regex)
+
+    # Replace ignore patterns (need to escape the original to find it in escaped pattern)
+    for original, replacement in ignore_replacements:
+        escaped_original = re.escape(original)
+        pattern = pattern.replace(escaped_original, replacement)
 
     return re.compile(f"^{pattern}$")
 
