@@ -44,7 +44,7 @@ class MainWindow(QMainWindow):
     def _setup_ui(self) -> None:
         """Initialize and layout all UI components."""
         self.setWindowTitle("YouTube Bootlegger")
-        self.setMinimumSize(700, 600)
+        self.setMinimumSize(700, 800)
 
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -60,6 +60,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._video_preview)
 
         self._tracklist_input = TracklistInputWidget()
+        # self._tracklist_input.setMinimumHeight(200)
         layout.addWidget(self._tracklist_input)
 
         self._directory_picker = DirectoryPickerWidget()
