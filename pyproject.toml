@@ -1,0 +1,16 @@
+[project]
+name = "youtube-bootlegger"
+version = "0.1.0"
+description = "Download and split YouTube live performance audio into individual song files"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "pyside6>=6.10.2",
+    "yt-dlp>=2026.2.21",
+]
+
+[project.scripts]
+youtube-bootlegger = "youtube_bootlegger.app:run"
+
+[tool.setuptools.packages.find]
+where = ["src"]
