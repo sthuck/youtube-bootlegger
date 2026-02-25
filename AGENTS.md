@@ -8,8 +8,14 @@ YouTube Bootlegger is a PySide6 (Qt 6) desktop application that downloads YouTub
 
 ### Running the application
 
+Widget UI (original):
 ```
 uv run python main.py
+```
+
+QML UI (modern dark theme):
+```
+uv run python main_qml.py
 ```
 
 ### Running tests
