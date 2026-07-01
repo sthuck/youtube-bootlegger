@@ -437,6 +437,44 @@ class TestHoursTemplateParsing:
         assert result.seconds == 25
         assert result.name == "baz"
 
+    def test_minutes_overflow_raises_when_hours_present(self):
+        """Minutes >= 60 should be rejected once %hh% is present."""
+        with pytest.raises(ParseError) as exc_info:
+            parse_line("1:99:30 - song", self.HH_TEMPLATE, 1)
+        assert "Minutes" in str(exc_info.value)
+
+    def test_minutes_59_is_still_valid_with_hours(self):
+        """Minutes at the boundary (59) should still be accepted."""
+        result = parse_line("1:59:30 - song", self.HH_TEMPLATE, 1)
+        assert result.hours == 1
+        assert result.minutes == 59
+
+    def test_minutes_over_60_allowed_without_hours(self):
+        """Without %hh%, minutes may exceed 60 (e.g. long single recordings)."""
+        result = parse_line("Test - 125:30", "%songname% - %mm%:%ss%", 1)
+        assert result.minutes == 125
+        assert result.seconds == 30
+
+    def test_hh_three_digits_rejected(self):
+        """Hours with 3+ digits should not match the 1-2 digit hh pattern."""
+        with pytest.raises(ParseError):
+            parse_line("100:00:00 - song", self.HH_TEMPLATE, 1)
+
+    def test_ignore_placeholder_with_two_part_hh_mm(self):
+        """%ignore:...% combined with the hh:mm shorthand (no seconds)."""
+        template = r"%ignore:\d+\.% %songname% - %hh%:%mm%:%ss%"
+        result = parse_line("7. Long Track - 50:23", template, 1)
+        assert result.name == "Long Track"
+        assert result.hours == 50
+        assert result.minutes == 23
+        assert result.seconds == 0
+
+    def test_preview_with_two_part_hh_mm_shorthand(self):
+        """preview_parse should render hh:mm shorthand with zeroed seconds."""
+        result = preview_parse("Long - 50:23", "%songname% - %hh%:%mm%:%ss%")
+        assert result.tracks[0].is_valid is True
+        assert result.tracks[0].timestamp == "50:23:00"
+
 
 class TestEdgeCases:
     """Tests for edge cases."""

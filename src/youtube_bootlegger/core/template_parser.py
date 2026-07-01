@@ -10,7 +10,8 @@ Placeholders:
 - %songname% - The song name (required)
 - %hh% - Hours (required when present in template; supports hh:mm or hh:mm:ss)
 - %mm% - Minutes (required)
-- %ss% - Seconds (required in template; optional in input when %hh% is used)
+- %ss% - Seconds (required in template; optional in input, but only when
+  %hh%, %mm%, %ss% appear together as the literal "%hh%:%mm%:%ss%" run)
 - %ignore:regex% - Match and ignore pattern (can use multiple)
 """
 
@@ -33,16 +34,18 @@ REQUIRED_PLACEHOLDERS = {"%songname%", "%mm%", "%ss%"}
 
 # Consecutive time-placeholder runs are compiled into flexible patterns.
 # %hh%:%mm%:%ss% accepts hh:mm or hh:mm:ss; %mm%:%ss% accepts mm:ss only.
+# Markers use control characters that can't appear in a template string
+# typed by a user, so they can never collide with literal template text.
 TIME_RUN_REPLACEMENTS = (
     (
         "%hh%:%mm%:%ss%",
         r"(?P<hh>\d{1,2}):(?P<mm>\d{1,2})(?::(?P<ss>\d{2}))?",
-        "@@TIME_HH_MM_SS@@",
+        "\x00TIME_HH_MM_SS\x00",
     ),
     (
         "%mm%:%ss%",
         r"(?P<mm>\d{1,3}):(?P<ss>\d{2})",
-        "@@TIME_MM_SS@@",
+        "\x00TIME_MM_SS\x00",
     ),
 )
 
@@ -202,19 +205,25 @@ def parse_line(line: str, template: str, line_number: int) -> ParsedTrack:
     try:
         minutes = int(groups["mm"])
         if has_hours:
-            if groups.get("hh") is None:
-                raise KeyError("hh")
-            hours = int(groups["hh"])
+            hours = int(groups.get("hh"))
             seconds = int(groups["ss"]) if groups.get("ss") is not None else 0
         else:
             hours = 0
             seconds = int(groups["ss"])
-    except (ValueError, KeyError) as e:
+    except (ValueError, TypeError, KeyError) as e:
         raise ParseError(f"Line {line_number}: Invalid time format") from e
 
     if seconds >= 60:
         raise ParseError(
             f"Line {line_number}: Seconds must be less than 60 (got {seconds})"
+        )
+
+    # Once hours are tracked separately, minutes must not roll over into them.
+    # Without %hh%, minutes are allowed to exceed 60 (e.g. 125:30 for a long
+    # single recording with no hour component in the template).
+    if has_hours and minutes >= 60:
+        raise ParseError(
+            f"Line {line_number}: Minutes must be less than 60 (got {minutes})"
         )
 
     return ParsedTrack(
