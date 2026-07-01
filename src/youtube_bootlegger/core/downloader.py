@@ -1,5 +1,8 @@
 """YouTube audio downloader using yt-dlp."""
 
+import re
+import shutil
+import subprocess
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
