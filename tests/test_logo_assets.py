@@ -1,7 +1,7 @@
 import struct
 import xml.etree.ElementTree as ET
 
-from youtube_bootlegger.resources import APP_LOGO_PNG, APP_LOGO_SVG
+from src.youtube_bootlegger.resources import APP_LOGO_PNG, APP_LOGO_SVG
 
 
 def test_logo_assets_exist_and_have_expected_dimensions():
