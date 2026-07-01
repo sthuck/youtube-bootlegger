@@ -1,6 +1,7 @@
 """Main application window."""
 
 from PySide6.QtCore import QThreadPool, QTimer
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QMainWindow,
@@ -11,6 +12,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..core import parse_tracklist_with_template
+from ..core.settings import get_settings
 from ..models import DownloadJob
 from ..utils import is_ffmpeg_available, is_valid_youtube_url
 from ..workers import PipelineWorker, VideoInfoWorker
@@ -18,6 +20,7 @@ from .widgets import (
     DirectoryPickerWidget,
     MetadataInputWidget,
     ProgressPanelWidget,
+    SettingsDialog,
     TracklistInputWidget,
     UrlInputWidget,
     VideoPreviewWidget,
@@ -39,6 +42,7 @@ class MainWindow(QMainWindow):
         self._url_debounce_timer.timeout.connect(self._fetch_video_info)
         self._last_fetched_url = ""
         self._setup_ui()
+        self._setup_menu()
         self._connect_signals()
         self._check_ffmpeg()
 
@@ -98,6 +102,20 @@ class MainWindow(QMainWindow):
 
         main_layout.addLayout(right_column, 2)  # Narrower column
 
+    def _setup_menu(self) -> None:
+        """Set up the menu bar with a Settings entry."""
+        settings_action = QAction("Settings...", self)
+        settings_action.triggered.connect(self._open_settings_dialog)
+
+        file_menu = self.menuBar().addMenu("File")
+        file_menu.addAction(settings_action)
+
+    def _open_settings_dialog(self) -> None:
+        """Open the settings dialog and re-check ffmpeg availability afterward."""
+        dialog = SettingsDialog(self)
+        if dialog.exec():
+            self._check_ffmpeg()
+
     def _connect_signals(self) -> None:
         """Connect widget signals to slots."""
         self._start_button.clicked.connect(self._on_start_clicked)
@@ -106,12 +124,14 @@ class MainWindow(QMainWindow):
 
     def _check_ffmpeg(self) -> None:
         """Check if ffmpeg is available."""
-        if not is_ffmpeg_available():
+        ffmpeg_command = get_settings().resolved_ffmpeg_command()
+        if not is_ffmpeg_available(ffmpeg_command):
             QMessageBox.warning(
                 self,
                 "FFmpeg Not Found",
-                "FFmpeg is not installed or not in your PATH.\n\n"
-                "Please install FFmpeg to use this application.\n\n"
+                f"FFmpeg was not found at '{ffmpeg_command}'.\n\n"
+                "Please install FFmpeg, ensure it's in your PATH, or set a "
+                "custom path in Settings.\n\n"
                 "On Linux: sudo apt install ffmpeg\n"
                 "On macOS: brew install ffmpeg\n"
                 "On Windows: Download from ffmpeg.org",
@@ -182,6 +202,11 @@ class MainWindow(QMainWindow):
         tracks_valid, tracks_error = self._tracklist_input.validate()
         if not tracks_valid:
             self._tracklist_input.set_error(tracks_error)
+            return
+
+        metadata_valid, metadata_error = self._metadata_input.validate()
+        if not metadata_valid:
+            self._metadata_input.set_error(metadata_error)
             return
 
         dir_valid, dir_error = self._directory_picker.validate()
@@ -296,4 +321,5 @@ class MainWindow(QMainWindow):
         """Clear all validation errors."""
         self._url_input.clear_error()
         self._tracklist_input.clear_error()
+        self._metadata_input.clear_error()
         self._directory_picker.clear_error()
