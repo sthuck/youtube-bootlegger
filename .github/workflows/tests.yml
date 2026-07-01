@@ -1,0 +1,39 @@
+name: Tests
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+jobs:
+  test:
+    name: Run tests
+    runs-on: ubuntu-latest
+    # Skip draft PRs; when a draft is later marked "ready for review" the
+    # ready_for_review event re-triggers this workflow with draft == false.
+    if: github.event.pull_request.draft == false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.2.0
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Install Qt xcb platform plugin dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 libopengl0 libxcb-cursor0 libxkbcommon-x11-0 \
+            libxcb-xkb1 libxcb-xinerama0 libxcb-icccm4 libxcb-image0 \
+            libxcb-keysyms1 libxcb-render-util0 libxcb-shape0
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Run tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: uv run pytest -v

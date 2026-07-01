@@ -16,15 +16,15 @@ exec_directory = .
 project_file = 
 
 # application icon
-icon = /home/aviad/git/personal/youtube-bootlegger/.venv/lib/python3.12/site-packages/PySide6/scripts/deploy_lib/pyside_icon.jpg
+icon = 
 
 [python]
 
 # python path
-python_path = /home/aviad/git/personal/youtube-bootlegger/.venv/bin/python
+python_path = 
 
 # python packages to install
-packages = Nuitka==2.7.11
+packages = Nuitka
 
 # buildozer = for deploying Android application
 android_packages = buildozer==1.5.0,cython==0.29.33
@@ -34,13 +34,13 @@ android_packages = buildozer==1.5.0,cython==0.29.33
 # paths to required qml files. comma separated
 # normally all the qml files required by the project are added automatically
 # design studio projects include the qml files using qt resources
-qml_files = 
+qml_files = src/youtube_bootlegger/qml/Main.qml,src/youtube_bootlegger/qml/ProgressPanel.qml,src/youtube_bootlegger/qml/SettingsPanel.qml,src/youtube_bootlegger/qml/TracklistPanel.qml,src/youtube_bootlegger/qml/VideoPreview.qml
 
 # excluded qml plugin binaries
-excluded_qml_plugins = 
+excluded_qml_plugins = QtCharts,QtQuick3D,QtSensors,QtTest,QtWebEngine
 
 # qt modules used. comma separated
-modules = Core,DBus,Gui,Network,Widgets
+modules = Core,DBus,Gui,Network,OpenGL,Qml,QmlMeta,QmlModels,QmlWorkerScript,Quick,QuickControls2,QuickTemplates2,Widgets
 
 # qt plugins used by the application. only relevant for desktop deployment
 # for qt plugins used in android application see [android][plugins]
@@ -68,7 +68,12 @@ macos.permissions =
 mode = onefile
 
 # specify any extra nuitka arguments
-extra_args = --quiet --noinclude-qt-translations
+# yt_dlp.extractor.lazy_extractors is a ~15k line generated module that makes
+# Nuitka's C compilation pathologically slow and memory hungry. Excluding it
+# from compilation is safe, yt-dlp catches the resulting ImportError at
+# runtime and falls back to importing its extractors directly (see
+# yt_dlp/extractor/extractors.py).
+extra_args = --quiet --noinclude-qt-translations --nofollow-import-to=yt_dlp.extractor.lazy_extractors
 
 [buildozer]
 
