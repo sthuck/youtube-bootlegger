@@ -17,3 +17,8 @@ class TestBuildExtractionPrompt:
     def test_template_help_is_included(self):
         prompt = build_extraction_prompt("Show", "Song - 0:00")
         assert TEMPLATE_HELP.splitlines()[0] in prompt
+
+    def test_template_help_documents_hh_mm_shorthand(self):
+        """The LLM must know hh:mm (no seconds) is valid alongside hh:mm:ss."""
+        assert "hh:mm" in TEMPLATE_HELP
+        assert "%hh%:%mm%:%ss%" in TEMPLATE_HELP
