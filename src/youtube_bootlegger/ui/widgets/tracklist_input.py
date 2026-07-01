@@ -7,6 +7,8 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPlainTextEdit,
+    QProgressBar,
+    QPushButton,
     QScrollArea,
     QSizePolicy,
     QVBoxLayout,
@@ -36,10 +38,13 @@ Final Song - 12:47"""
 
     template_changed = Signal(str)
     tracklist_changed = Signal()
+    ai_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self._theme = ThemeColors()
+        self._ai_available = False
+        self._ai_loading = False
         self._setup_ui()
         self._connect_signals()
         self._update_preview()
@@ -82,9 +87,25 @@ Final Song - 12:47"""
 
         layout.addLayout(template_layout)
 
+        tracklist_header = QHBoxLayout()
         tracklist_label = QLabel("Track List:")
         tracklist_label.setStyleSheet("font-weight: bold;")
-        layout.addWidget(tracklist_label)
+        tracklist_header.addWidget(tracklist_label)
+        tracklist_header.addStretch()
+
+        self._ai_button = QPushButton("AI")
+        self._ai_button.setToolTip("Analyze track list with AI to infer template and metadata")
+        self._ai_button.setEnabled(False)
+        self._ai_button.clicked.connect(self.ai_requested.emit)
+        tracklist_header.addWidget(self._ai_button)
+
+        self._ai_spinner = QProgressBar()
+        self._ai_spinner.setRange(0, 0)
+        self._ai_spinner.setFixedWidth(80)
+        self._ai_spinner.hide()
+        tracklist_header.addWidget(self._ai_spinner)
+
+        layout.addLayout(tracklist_header)
 
         input_preview_layout = QHBoxLayout()
         input_preview_layout.setSpacing(10)
@@ -182,6 +203,26 @@ Final Song - 12:47"""
     def _on_tracklist_changed(self) -> None:
         self._update_preview()
         self.tracklist_changed.emit()
+
+    def set_ai_available(self, available: bool) -> None:
+        """Enable or disable the AI assist button when not loading."""
+        self._ai_available = available
+        self._refresh_ai_state()
+
+    def set_ai_loading(self, loading: bool) -> None:
+        """Show or hide the AI loading spinner."""
+        self._ai_loading = loading
+        self._ai_button.setVisible(not loading)
+        self._ai_spinner.setVisible(loading)
+        self._refresh_ai_state()
+
+    def _refresh_ai_state(self) -> None:
+        self._ai_button.setEnabled(self._ai_available and not self._ai_loading)
+
+    def set_template(self, template: str) -> None:
+        """Set the template text programmatically."""
+        self._template_input.setText(template)
+        self._on_template_changed(template)
 
     def _update_preview(self) -> None:
         while self._preview_layout.count() > 1:

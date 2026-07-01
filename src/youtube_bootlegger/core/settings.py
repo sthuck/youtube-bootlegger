@@ -1,5 +1,6 @@
 """Persistent application settings for external tool configuration."""
 
+from enum import StrEnum
 from typing import Any, Protocol
 
 from PySide6.QtCore import QSettings
@@ -10,6 +11,27 @@ _APP_NAME = "YouTubeBootlegger"
 _USE_EXTERNAL_KEY = "ytdlp/use_external"
 _YTDLP_PATH_KEY = "ytdlp/path"
 _FFMPEG_PATH_KEY = "ffmpeg/path"
+
+_LLM_PROVIDER_KEY = "llm/provider"
+_OPENAI_API_KEY = "llm/openai_api_key"
+_OPENAI_MODEL_KEY = "llm/openai_model"
+_ANTHROPIC_API_KEY = "llm/anthropic_api_key"
+_ANTHROPIC_MODEL_KEY = "llm/anthropic_model"
+_VERTEX_API_KEY = "llm/vertex_api_key"
+_VERTEX_MODEL_KEY = "llm/vertex_model"
+_COMPATIBLE_BASE_URL_KEY = "llm/compatible_base_url"
+_COMPATIBLE_BEARER_TOKEN_KEY = "llm/compatible_bearer_token"
+_COMPATIBLE_MODEL_KEY = "llm/compatible_model"
+
+
+class LlmProvider(StrEnum):
+    """Supported LLM provider options (only one may be active)."""
+
+    NONE = "none"
+    OPENAI = "openai"
+    ANTHROPIC = "anthropic"
+    VERTEX = "vertex"
+    OPENAI_COMPATIBLE = "openai_compatible"
 
 
 class SettingsBackend(Protocol):
@@ -83,6 +105,90 @@ class AppSettings:
     def resolved_ffmpeg_command(self) -> str:
         """Return the ffmpeg executable to invoke."""
         return self.ffmpeg_path or "ffmpeg"
+
+    @property
+    def llm_provider(self) -> LlmProvider:
+        raw = str(self._backend.value(_LLM_PROVIDER_KEY, LlmProvider.NONE) or LlmProvider.NONE)
+        try:
+            return LlmProvider(raw)
+        except ValueError:
+            return LlmProvider.NONE
+
+    @llm_provider.setter
+    def llm_provider(self, provider: LlmProvider | str) -> None:
+        self._backend.setValue(_LLM_PROVIDER_KEY, str(provider))
+
+    @property
+    def openai_api_key(self) -> str:
+        return str(self._backend.value(_OPENAI_API_KEY, "") or "")
+
+    @openai_api_key.setter
+    def openai_api_key(self, value: str) -> None:
+        self._backend.setValue(_OPENAI_API_KEY, (value or "").strip())
+
+    @property
+    def openai_model(self) -> str:
+        return str(self._backend.value(_OPENAI_MODEL_KEY, "") or "")
+
+    @openai_model.setter
+    def openai_model(self, value: str) -> None:
+        self._backend.setValue(_OPENAI_MODEL_KEY, (value or "").strip())
+
+    @property
+    def anthropic_api_key(self) -> str:
+        return str(self._backend.value(_ANTHROPIC_API_KEY, "") or "")
+
+    @anthropic_api_key.setter
+    def anthropic_api_key(self, value: str) -> None:
+        self._backend.setValue(_ANTHROPIC_API_KEY, (value or "").strip())
+
+    @property
+    def anthropic_model(self) -> str:
+        return str(self._backend.value(_ANTHROPIC_MODEL_KEY, "") or "")
+
+    @anthropic_model.setter
+    def anthropic_model(self, value: str) -> None:
+        self._backend.setValue(_ANTHROPIC_MODEL_KEY, (value or "").strip())
+
+    @property
+    def vertex_api_key(self) -> str:
+        return str(self._backend.value(_VERTEX_API_KEY, "") or "")
+
+    @vertex_api_key.setter
+    def vertex_api_key(self, value: str) -> None:
+        self._backend.setValue(_VERTEX_API_KEY, (value or "").strip())
+
+    @property
+    def vertex_model(self) -> str:
+        return str(self._backend.value(_VERTEX_MODEL_KEY, "") or "")
+
+    @vertex_model.setter
+    def vertex_model(self, value: str) -> None:
+        self._backend.setValue(_VERTEX_MODEL_KEY, (value or "").strip())
+
+    @property
+    def compatible_base_url(self) -> str:
+        return str(self._backend.value(_COMPATIBLE_BASE_URL_KEY, "") or "")
+
+    @compatible_base_url.setter
+    def compatible_base_url(self, value: str) -> None:
+        self._backend.setValue(_COMPATIBLE_BASE_URL_KEY, (value or "").strip())
+
+    @property
+    def compatible_bearer_token(self) -> str:
+        return str(self._backend.value(_COMPATIBLE_BEARER_TOKEN_KEY, "") or "")
+
+    @compatible_bearer_token.setter
+    def compatible_bearer_token(self, value: str) -> None:
+        self._backend.setValue(_COMPATIBLE_BEARER_TOKEN_KEY, (value or "").strip())
+
+    @property
+    def compatible_model(self) -> str:
+        return str(self._backend.value(_COMPATIBLE_MODEL_KEY, "") or "")
+
+    @compatible_model.setter
+    def compatible_model(self, value: str) -> None:
+        self._backend.setValue(_COMPATIBLE_MODEL_KEY, (value or "").strip())
 
     def sync(self) -> None:
         """Flush settings to persistent storage."""

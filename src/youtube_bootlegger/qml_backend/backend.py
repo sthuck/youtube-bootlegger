@@ -18,11 +18,12 @@ from ..core import (
     preview_parse,
     validate_template,
 )
-from ..core.settings import get_settings
+from ..llm import is_llm_configured
+from ..core.settings import LlmProvider, get_settings
 from ..core.video_info import VideoInfo
 from ..models import DownloadJob
 from ..utils import is_ffmpeg_available, is_valid_youtube_url
-from ..workers import PipelineWorker, VideoInfoWorker
+from ..workers import PipelineWorker, TracklistAiWorker, VideoInfoWorker
 from .models import StatusLogModel, TrackPreviewModel
 
 
@@ -68,6 +69,22 @@ class AppBackend(QObject):
     useExternalYtdlpChanged = Signal()
     ytdlpPathChanged = Signal()
     ffmpegPathChanged = Signal()
+    llmProviderChanged = Signal()
+    llmConfiguredChanged = Signal()
+    openaiApiKeyChanged = Signal()
+    openaiModelChanged = Signal()
+    anthropicApiKeyChanged = Signal()
+    anthropicModelChanged = Signal()
+    vertexApiKeyChanged = Signal()
+    vertexModelChanged = Signal()
+    compatibleBaseUrlChanged = Signal()
+    compatibleBearerTokenChanged = Signal()
+    compatibleModelChanged = Signal()
+    currentTemplateChanged = Signal()
+    artistNameChanged = Signal()
+    albumNameChanged = Signal()
+    aiAnalyzingChanged = Signal()
+    aiAvailableChanged = Signal()
 
     showMessage = Signal(str, str, bool)  # title, message, isError
 
@@ -97,6 +114,24 @@ class AppBackend(QObject):
     useExternalYtdlp = Property(bool, _getter("_use_external_ytdlp"), notify=useExternalYtdlpChanged)
     ytdlpPath = Property(str, _getter("_ytdlp_path"), notify=ytdlpPathChanged)
     ffmpegPath = Property(str, _getter("_ffmpeg_path"), notify=ffmpegPathChanged)
+    llmProvider = Property(str, _getter("_llm_provider"), notify=llmProviderChanged)
+    llmConfigured = Property(bool, _getter("_llm_configured"), notify=llmConfiguredChanged)
+    openaiApiKey = Property(str, _getter("_openai_api_key"), notify=openaiApiKeyChanged)
+    openaiModel = Property(str, _getter("_openai_model"), notify=openaiModelChanged)
+    anthropicApiKey = Property(str, _getter("_anthropic_api_key"), notify=anthropicApiKeyChanged)
+    anthropicModel = Property(str, _getter("_anthropic_model"), notify=anthropicModelChanged)
+    vertexApiKey = Property(str, _getter("_vertex_api_key"), notify=vertexApiKeyChanged)
+    vertexModel = Property(str, _getter("_vertex_model"), notify=vertexModelChanged)
+    compatibleBaseUrl = Property(str, _getter("_compatible_base_url"), notify=compatibleBaseUrlChanged)
+    compatibleBearerToken = Property(
+        str, _getter("_compatible_bearer_token"), notify=compatibleBearerTokenChanged
+    )
+    compatibleModel = Property(str, _getter("_compatible_model"), notify=compatibleModelChanged)
+    currentTemplate = Property(str, _getter("_template"), notify=currentTemplateChanged)
+    artistName = Property(str, _getter("_artist"), notify=artistNameChanged)
+    albumName = Property(str, _getter("_album"), notify=albumNameChanged)
+    aiAnalyzing = Property(bool, _getter("_ai_analyzing"), notify=aiAnalyzingChanged)
+    aiAvailable = Property(bool, _getter("_ai_available"), notify=aiAvailableChanged)
 
     trackPreviewModel = Property(QObject, _getter("_track_model"), constant=True)
     statusLogModel = Property(QObject, _getter("_log_model"), constant=True)
@@ -106,6 +141,7 @@ class AppBackend(QObject):
         self._thread_pool = QThreadPool()
         self._current_worker: PipelineWorker | None = None
         self._video_info_worker: VideoInfoWorker | None = None
+        self._tracklist_ai_worker: TracklistAiWorker | None = None
         self._video_info: VideoInfo | None = None
         self._last_fetched_url = ""
 
@@ -145,9 +181,23 @@ class AppBackend(QObject):
         self._ytdlp_path = self._app_settings.ytdlp_path
         self._ffmpeg_path = self._app_settings.ffmpeg_path
         self._ffmpeg_missing = not is_ffmpeg_available(self._app_settings.resolved_ffmpeg_command())
+        self._llm_provider = self._app_settings.llm_provider.value
+        self._llm_configured = is_llm_configured(self._app_settings)
+        self._openai_api_key = self._app_settings.openai_api_key
+        self._openai_model = self._app_settings.openai_model
+        self._anthropic_api_key = self._app_settings.anthropic_api_key
+        self._anthropic_model = self._app_settings.anthropic_model
+        self._vertex_api_key = self._app_settings.vertex_api_key
+        self._vertex_model = self._app_settings.vertex_model
+        self._compatible_base_url = self._app_settings.compatible_base_url
+        self._compatible_bearer_token = self._app_settings.compatible_bearer_token
+        self._compatible_model = self._app_settings.compatible_model
+        self._ai_analyzing = False
+        self._ai_available = False
 
         self._track_model = TrackPreviewModel(self)
         self._log_model = StatusLogModel(self)
+        self._refresh_ai_available()
 
     # ── Private helpers ─────────────────────────────────────────────
 
@@ -155,6 +205,24 @@ class AppBackend(QObject):
         if getattr(self, attr) != value:
             setattr(self, attr, value)
             signal.emit()
+
+    def _refresh_ai_available(self):
+        has_tracklist = bool(self._tracklist_text.strip())
+        has_video = self._video_info is not None
+        configured = is_llm_configured(self._app_settings)
+        self._emit(
+            "_ai_available",
+            has_tracklist and has_video and configured and not self._ai_analyzing,
+            self.aiAvailableChanged,
+        )
+
+    def _refresh_llm_configured(self):
+        self._emit(
+            "_llm_configured",
+            is_llm_configured(self._app_settings),
+            self.llmConfiguredChanged,
+        )
+        self._refresh_ai_available()
 
     # ── Slots (called from QML) ─────────────────────────────────────
 
@@ -179,6 +247,7 @@ class AppBackend(QObject):
     @Slot(str)
     def setTemplate(self, text):
         self._template = text
+        self.currentTemplateChanged.emit()
         v = validate_template(text)
         self._emit(
             "_template_error",
@@ -191,15 +260,18 @@ class AppBackend(QObject):
     def setTracklistText(self, text):
         self._tracklist_text = text
         self._update_preview()
+        self._refresh_ai_available()
 
     @Slot(str)
     def setArtist(self, text):
         self._artist = text.strip()
+        self.artistNameChanged.emit()
         self._emit("_metadata_error", "", self.metadataErrorChanged)
 
     @Slot(str)
     def setAlbum(self, text):
         self._album = text.strip()
+        self.albumNameChanged.emit()
         self._emit("_metadata_error", "", self.metadataErrorChanged)
 
     @Slot(str)
@@ -229,6 +301,141 @@ class AppBackend(QObject):
             not is_ffmpeg_available(self._app_settings.resolved_ffmpeg_command()),
             self.ffmpegMissingChanged,
         )
+
+    @Slot(str)
+    def setLlmProvider(self, provider):
+        try:
+            parsed = LlmProvider(provider)
+        except ValueError:
+            parsed = LlmProvider.NONE
+        self._app_settings.llm_provider = parsed
+        self._app_settings.sync()
+        self._emit("_llm_provider", parsed.value, self.llmProviderChanged)
+        self._refresh_llm_configured()
+
+    @Slot(str)
+    def setOpenaiApiKey(self, value):
+        self._app_settings.openai_api_key = value
+        self._app_settings.sync()
+        self._emit("_openai_api_key", self._app_settings.openai_api_key, self.openaiApiKeyChanged)
+        self._refresh_llm_configured()
+
+    @Slot(str)
+    def setOpenaiModel(self, value):
+        self._app_settings.openai_model = value
+        self._app_settings.sync()
+        self._emit("_openai_model", self._app_settings.openai_model, self.openaiModelChanged)
+
+    @Slot(str)
+    def setAnthropicApiKey(self, value):
+        self._app_settings.anthropic_api_key = value
+        self._app_settings.sync()
+        self._emit(
+            "_anthropic_api_key",
+            self._app_settings.anthropic_api_key,
+            self.anthropicApiKeyChanged,
+        )
+        self._refresh_llm_configured()
+
+    @Slot(str)
+    def setAnthropicModel(self, value):
+        self._app_settings.anthropic_model = value
+        self._app_settings.sync()
+        self._emit(
+            "_anthropic_model",
+            self._app_settings.anthropic_model,
+            self.anthropicModelChanged,
+        )
+
+    @Slot(str)
+    def setVertexApiKey(self, value):
+        self._app_settings.vertex_api_key = value
+        self._app_settings.sync()
+        self._emit("_vertex_api_key", self._app_settings.vertex_api_key, self.vertexApiKeyChanged)
+        self._refresh_llm_configured()
+
+    @Slot(str)
+    def setVertexModel(self, value):
+        self._app_settings.vertex_model = value
+        self._app_settings.sync()
+        self._emit("_vertex_model", self._app_settings.vertex_model, self.vertexModelChanged)
+
+    @Slot(str)
+    def setCompatibleBaseUrl(self, value):
+        self._app_settings.compatible_base_url = value
+        self._app_settings.sync()
+        self._emit(
+            "_compatible_base_url",
+            self._app_settings.compatible_base_url,
+            self.compatibleBaseUrlChanged,
+        )
+        self._refresh_llm_configured()
+
+    @Slot(str)
+    def setCompatibleBearerToken(self, value):
+        self._app_settings.compatible_bearer_token = value
+        self._app_settings.sync()
+        self._emit(
+            "_compatible_bearer_token",
+            self._app_settings.compatible_bearer_token,
+            self.compatibleBearerTokenChanged,
+        )
+
+    @Slot(str)
+    def setCompatibleModel(self, value):
+        self._app_settings.compatible_model = value
+        self._app_settings.sync()
+        self._emit(
+            "_compatible_model",
+            self._app_settings.compatible_model,
+            self.compatibleModelChanged,
+        )
+
+    @Slot()
+    def analyzeTracklistWithAi(self):
+        if self._ai_analyzing:
+            return
+        if self._video_info is None:
+            self.showMessage.emit(
+                "AI Assist",
+                "Please wait for video info to load before using AI.",
+                True,
+            )
+            return
+        if not self._tracklist_text.strip():
+            return
+        if not is_llm_configured(self._app_settings):
+            self.showMessage.emit(
+                "AI Assist",
+                "LLM is not configured. Add API credentials in Settings.",
+                True,
+            )
+            return
+
+        self._emit("_ai_analyzing", True, self.aiAnalyzingChanged)
+
+        self._tracklist_ai_worker = TracklistAiWorker(
+            self._app_settings,
+            self._video_info.title,
+            self._tracklist_text,
+        )
+        self._tracklist_ai_worker.signals.finished.connect(self._on_ai_finished)
+        self._tracklist_ai_worker.signals.error.connect(self._on_ai_error)
+        self._thread_pool.start(self._tracklist_ai_worker)
+
+    def _on_ai_finished(self, result):
+        self._emit("_ai_analyzing", False, self.aiAnalyzingChanged)
+        self.setTemplate(result.template)
+        if result.artist_name:
+            self.setArtist(result.artist_name)
+        if result.album_name:
+            self.setAlbum(result.album_name)
+        self._refresh_ai_available()
+
+    def _on_ai_error(self, message: str):
+        self._emit("_ai_analyzing", False, self.aiAnalyzingChanged)
+        self._refresh_ai_available()
+        self.showMessage.emit("AI Assist", message, True)
 
     @Slot()
     def startPipeline(self):
@@ -329,12 +536,14 @@ class AppBackend(QObject):
         self._emit("_video_loaded", True, self.videoLoadedChanged)
         self._emit("_video_error", "", self.videoErrorChanged)
         self._emit("_album_placeholder", info.title, self.albumPlaceholderChanged)
+        self._refresh_ai_available()
 
     def _on_video_info_error(self, message: str):
         self._emit("_video_error", message, self.videoErrorChanged)
         self._emit("_video_loading", False, self.videoLoadingChanged)
         self._emit("_video_loaded", False, self.videoLoadedChanged)
         self._emit("_url_error", message, self.urlErrorChanged)
+        self._refresh_ai_available()
 
     def _set_video_loading(self):
         self._video_info = None
@@ -346,6 +555,7 @@ class AppBackend(QObject):
         self._emit("_video_loading", True, self.videoLoadingChanged)
         self._emit("_video_loaded", False, self.videoLoadedChanged)
         self._emit("_video_error", "", self.videoErrorChanged)
+        self._refresh_ai_available()
 
     def _clear_video(self):
         self._video_info = None
@@ -361,6 +571,7 @@ class AppBackend(QObject):
             self._emit(attr, "", sig)
         self._emit("_video_loading", False, self.videoLoadingChanged)
         self._emit("_video_loaded", False, self.videoLoadedChanged)
+        self._refresh_ai_available()
 
     # ── Preview ─────────────────────────────────────────────────────
 

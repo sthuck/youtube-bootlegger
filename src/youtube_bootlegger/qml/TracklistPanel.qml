@@ -40,8 +40,8 @@ Rectangle {
                     verticalAlignment: Text.AlignVCenter
                     color: root.colors.text; font { pixelSize: 13; family: "monospace" }
                     clip: true
-                    text: backend.defaultTemplate
-                    onTextChanged: backend.setTemplate(text)
+                    text: backend.currentTemplate
+                    onTextChanged: if (text !== backend.currentTemplate) backend.setTemplate(text)
                 }
             }
 
@@ -52,8 +52,35 @@ Rectangle {
             }
         }
 
-        /* ── track list label ── */
-        Text { text: "TRACK LIST"; color: root.colors.textSec; font { pixelSize: 11; weight: Font.DemiBold; letterSpacing: 0.8 } }
+        /* ── track list label + AI ── */
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 8
+            Text { text: "TRACK LIST"; color: root.colors.textSec; font { pixelSize: 11; weight: Font.DemiBold; letterSpacing: 0.8 } }
+            Item { Layout.fillWidth: true }
+
+            Rectangle {
+                width: 52; height: 28; radius: root.colors.radiusSm
+                visible: !backend.aiAnalyzing
+                enabled: backend.aiAvailable && !backend.busy
+                opacity: enabled ? 1.0 : 0.45
+                color: aiMA.containsMouse && enabled ? root.colors.accentHover : root.colors.accent
+                Text { anchors.centerIn: parent; text: "AI"; color: "white"; font { pixelSize: 12; weight: Font.DemiBold } }
+                MouseArea {
+                    id: aiMA; anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                    onClicked: if (enabled) backend.analyzeTracklistWithAi()
+                }
+            }
+
+            BusyIndicator {
+                visible: backend.aiAnalyzing
+                Layout.preferredWidth: 24
+                Layout.preferredHeight: 24
+                running: backend.aiAnalyzing
+            }
+        }
 
         /* ── input + preview side by side ── */
         RowLayout {

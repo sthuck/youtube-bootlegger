@@ -21,18 +21,24 @@ Item {
     Rectangle {
         id: card
         anchors.centerIn: parent
-        width: 460
-        implicitHeight: content.implicitHeight + 48
+        width: 520
+        height: Math.min(parent.height - 48, contentScroll.contentHeight + 48)
         color: root.colors.card
         radius: 14
         border.color: root.colors.border; border.width: 1
 
         MouseArea { anchors.fill: parent }
 
-        ColumnLayout {
-            id: content
+        ScrollView {
+            id: contentScroll
             anchors { fill: parent; margins: 24 }
-            spacing: 16
+            clip: true
+            ScrollBar.vertical.policy: ScrollBar.AsNeeded
+
+            ColumnLayout {
+                id: content
+                width: card.width - 48
+                spacing: 16
 
             Text { text: "Settings"; color: root.colors.text; font { pixelSize: 18; weight: Font.Bold } }
 
@@ -161,6 +167,250 @@ Item {
                 }
             }
 
+            /* ── AI assistant ── */
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 10
+
+                Text {
+                    text: "AI ASSISTANT"
+                    color: root.colors.textSec
+                    font { pixelSize: 11; weight: Font.DemiBold; letterSpacing: 0.8 }
+                }
+
+                Text {
+                    text: "Choose one provider. Credentials are stored locally. Track list text and video title are sent to the selected provider."
+                    color: root.colors.textMuted
+                    font.pixelSize: 11
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
+                }
+
+                Repeater {
+                    model: [
+                        { id: "none", label: "Disabled" },
+                        { id: "openai", label: "OpenAI" },
+                        { id: "anthropic", label: "Anthropic" },
+                        { id: "vertex", label: "Google Gemini (API key)" },
+                        { id: "openai_compatible", label: "OpenAI compatible" }
+                    ]
+                    delegate: Rectangle {
+                        required property var modelData
+                        Layout.fillWidth: true
+                        height: 34
+                        radius: root.colors.radiusSm
+                        color: backend.llmProvider === modelData.id ? root.colors.elevated : root.colors.inputBg
+                        border.color: backend.llmProvider === modelData.id ? root.colors.accent : root.colors.border
+                        border.width: 1
+                        Text {
+                            anchors { left: parent.left; leftMargin: 12; verticalCenter: parent.verticalCenter }
+                            text: modelData.label
+                            color: root.colors.text
+                            font.pixelSize: 13
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: backend.setLlmProvider(modelData.id)
+                        }
+                    }
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    visible: backend.llmProvider === "openai"
+                    opacity: visible ? 1.0 : 0.0
+
+                    Text { text: "OpenAI API key"; color: root.colors.textMuted; font.pixelSize: 12 }
+                    Rectangle {
+                        Layout.fillWidth: true; height: 36
+                        color: root.colors.inputBg; radius: root.colors.radiusSm
+                        border.color: openaiKeyField.activeFocus ? root.colors.borderFocus : root.colors.border
+                        border.width: openaiKeyField.activeFocus ? 2 : 1
+                        TextInput {
+                            id: openaiKeyField
+                            anchors { fill: parent; leftMargin: 10; rightMargin: 10 }
+                            verticalAlignment: Text.AlignVCenter
+                            color: root.colors.text; font.pixelSize: 13; clip: true
+                            echoMode: TextInput.Password
+                            text: backend.openaiApiKey
+                            onEditingFinished: backend.setOpenaiApiKey(text)
+                        }
+                    }
+
+                    Text { text: "Model"; color: root.colors.textMuted; font.pixelSize: 12 }
+                    Rectangle {
+                        Layout.fillWidth: true; height: 36
+                        color: root.colors.inputBg; radius: root.colors.radiusSm
+                        border.color: openaiModelField.activeFocus ? root.colors.borderFocus : root.colors.border
+                        border.width: openaiModelField.activeFocus ? 2 : 1
+                        TextInput {
+                            id: openaiModelField
+                            anchors { fill: parent; leftMargin: 10; rightMargin: 10 }
+                            verticalAlignment: Text.AlignVCenter
+                            color: root.colors.text; font.pixelSize: 13; clip: true
+                            text: backend.openaiModel
+                            onEditingFinished: backend.setOpenaiModel(text)
+                            Text {
+                                anchors.fill: parent; verticalAlignment: Text.AlignVCenter
+                                text: "gpt-5.4-mini"
+                                color: root.colors.textMuted; font.pixelSize: 12
+                                visible: !openaiModelField.text && !openaiModelField.activeFocus
+                            }
+                        }
+                    }
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    visible: backend.llmProvider === "anthropic"
+                    opacity: visible ? 1.0 : 0.0
+
+                    Text { text: "Anthropic API key"; color: root.colors.textMuted; font.pixelSize: 12 }
+                    Rectangle {
+                        Layout.fillWidth: true; height: 36
+                        color: root.colors.inputBg; radius: root.colors.radiusSm
+                        border.color: anthropicKeyField.activeFocus ? root.colors.borderFocus : root.colors.border
+                        border.width: anthropicKeyField.activeFocus ? 2 : 1
+                        TextInput {
+                            id: anthropicKeyField
+                            anchors { fill: parent; leftMargin: 10; rightMargin: 10 }
+                            verticalAlignment: Text.AlignVCenter
+                            color: root.colors.text; font.pixelSize: 13; clip: true
+                            echoMode: TextInput.Password
+                            text: backend.anthropicApiKey
+                            onEditingFinished: backend.setAnthropicApiKey(text)
+                        }
+                    }
+
+                    Text { text: "Model"; color: root.colors.textMuted; font.pixelSize: 12 }
+                    Rectangle {
+                        Layout.fillWidth: true; height: 36
+                        color: root.colors.inputBg; radius: root.colors.radiusSm
+                        border.color: anthropicModelField.activeFocus ? root.colors.borderFocus : root.colors.border
+                        border.width: anthropicModelField.activeFocus ? 2 : 1
+                        TextInput {
+                            id: anthropicModelField
+                            anchors { fill: parent; leftMargin: 10; rightMargin: 10 }
+                            verticalAlignment: Text.AlignVCenter
+                            color: root.colors.text; font.pixelSize: 13; clip: true
+                            text: backend.anthropicModel
+                            onEditingFinished: backend.setAnthropicModel(text)
+                            Text {
+                                anchors.fill: parent; verticalAlignment: Text.AlignVCenter
+                                text: "claude-sonnet-5"
+                                color: root.colors.textMuted; font.pixelSize: 12
+                                visible: !anthropicModelField.text && !anthropicModelField.activeFocus
+                            }
+                        }
+                    }
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    visible: backend.llmProvider === "vertex"
+                    opacity: visible ? 1.0 : 0.0
+
+                    Text { text: "Google AI Studio API key"; color: root.colors.textMuted; font.pixelSize: 12 }
+                    Rectangle {
+                        Layout.fillWidth: true; height: 36
+                        color: root.colors.inputBg; radius: root.colors.radiusSm
+                        border.color: vertexKeyField.activeFocus ? root.colors.borderFocus : root.colors.border
+                        border.width: vertexKeyField.activeFocus ? 2 : 1
+                        TextInput {
+                            id: vertexKeyField
+                            anchors { fill: parent; leftMargin: 10; rightMargin: 10 }
+                            verticalAlignment: Text.AlignVCenter
+                            color: root.colors.text; font.pixelSize: 13; clip: true
+                            echoMode: TextInput.Password
+                            text: backend.vertexApiKey
+                            onEditingFinished: backend.setVertexApiKey(text)
+                        }
+                    }
+
+                    Text { text: "Model"; color: root.colors.textMuted; font.pixelSize: 12 }
+                    Rectangle {
+                        Layout.fillWidth: true; height: 36
+                        color: root.colors.inputBg; radius: root.colors.radiusSm
+                        border.color: vertexModelField.activeFocus ? root.colors.borderFocus : root.colors.border
+                        border.width: vertexModelField.activeFocus ? 2 : 1
+                        TextInput {
+                            id: vertexModelField
+                            anchors { fill: parent; leftMargin: 10; rightMargin: 10 }
+                            verticalAlignment: Text.AlignVCenter
+                            color: root.colors.text; font.pixelSize: 13; clip: true
+                            text: backend.vertexModel
+                            onEditingFinished: backend.setVertexModel(text)
+                            Text {
+                                anchors.fill: parent; verticalAlignment: Text.AlignVCenter
+                                text: "gemini-2.0-flash"
+                                color: root.colors.textMuted; font.pixelSize: 12
+                                visible: !vertexModelField.text && !vertexModelField.activeFocus
+                            }
+                        }
+                    }
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    visible: backend.llmProvider === "openai_compatible"
+                    opacity: visible ? 1.0 : 0.0
+
+                    Text { text: "Base URL"; color: root.colors.textMuted; font.pixelSize: 12 }
+                    Rectangle {
+                        Layout.fillWidth: true; height: 36
+                        color: root.colors.inputBg; radius: root.colors.radiusSm
+                        border.color: compatibleUrlField.activeFocus ? root.colors.borderFocus : root.colors.border
+                        border.width: compatibleUrlField.activeFocus ? 2 : 1
+                        TextInput {
+                            id: compatibleUrlField
+                            anchors { fill: parent; leftMargin: 10; rightMargin: 10 }
+                            verticalAlignment: Text.AlignVCenter
+                            color: root.colors.text; font.pixelSize: 13; clip: true
+                            text: backend.compatibleBaseUrl
+                            onEditingFinished: backend.setCompatibleBaseUrl(text)
+                        }
+                    }
+
+                    Text { text: "Bearer token (optional)"; color: root.colors.textMuted; font.pixelSize: 12 }
+                    Rectangle {
+                        Layout.fillWidth: true; height: 36
+                        color: root.colors.inputBg; radius: root.colors.radiusSm
+                        border.color: compatibleTokenField.activeFocus ? root.colors.borderFocus : root.colors.border
+                        border.width: compatibleTokenField.activeFocus ? 2 : 1
+                        TextInput {
+                            id: compatibleTokenField
+                            anchors { fill: parent; leftMargin: 10; rightMargin: 10 }
+                            verticalAlignment: Text.AlignVCenter
+                            color: root.colors.text; font.pixelSize: 13; clip: true
+                            echoMode: TextInput.Password
+                            text: backend.compatibleBearerToken
+                            onEditingFinished: backend.setCompatibleBearerToken(text)
+                        }
+                    }
+
+                    Text { text: "Model"; color: root.colors.textMuted; font.pixelSize: 12 }
+                    Rectangle {
+                        Layout.fillWidth: true; height: 36
+                        color: root.colors.inputBg; radius: root.colors.radiusSm
+                        border.color: compatibleModelField.activeFocus ? root.colors.borderFocus : root.colors.border
+                        border.width: compatibleModelField.activeFocus ? 2 : 1
+                        TextInput {
+                            id: compatibleModelField
+                            anchors { fill: parent; leftMargin: 10; rightMargin: 10 }
+                            verticalAlignment: Text.AlignVCenter
+                            color: root.colors.text; font.pixelSize: 13; clip: true
+                            text: backend.compatibleModel
+                            onEditingFinished: backend.setCompatibleModel(text)
+                        }
+                    }
+                }
+            }
+
             Item { Layout.preferredHeight: 4 }
 
             Rectangle {
@@ -175,10 +425,20 @@ Item {
                     onClicked: {
                         ytdlpPathField.editingFinished()
                         ffmpegPathField.editingFinished()
+                        openaiKeyField.editingFinished()
+                        openaiModelField.editingFinished()
+                        anthropicKeyField.editingFinished()
+                        anthropicModelField.editingFinished()
+                        vertexKeyField.editingFinished()
+                        vertexModelField.editingFinished()
+                        compatibleUrlField.editingFinished()
+                        compatibleTokenField.editingFinished()
+                        compatibleModelField.editingFinished()
                         root.open = false
                     }
                 }
             }
+        }
         }
     }
 

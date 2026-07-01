@@ -196,7 +196,8 @@ ApplicationWindow {
                                 anchors { fill: parent; leftMargin: 12; rightMargin: 12 }
                                 verticalAlignment: Text.AlignVCenter
                                 color: _c.text; font.pixelSize: 13; clip: true
-                                onTextChanged: backend.setArtist(text)
+                                text: backend.artistName
+                                onTextChanged: if (text !== backend.artistName) backend.setArtist(text)
                                 Text {
                                     anchors.fill: parent; verticalAlignment: Text.AlignVCenter
                                     text: "Enter artist name"; color: _c.textMuted; font.pixelSize: 13
@@ -221,7 +222,8 @@ ApplicationWindow {
                                 anchors { fill: parent; leftMargin: 12; rightMargin: 12 }
                                 verticalAlignment: Text.AlignVCenter
                                 color: _c.text; font.pixelSize: 13; clip: true
-                                onTextChanged: backend.setAlbum(text)
+                                text: backend.albumName
+                                onTextChanged: if (text !== backend.albumName) backend.setAlbum(text)
                                 Text {
                                     anchors.fill: parent; verticalAlignment: Text.AlignVCenter
                                     text: backend.albumPlaceholder; color: _c.textMuted; font.pixelSize: 13

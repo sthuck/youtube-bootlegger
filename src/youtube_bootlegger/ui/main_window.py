@@ -12,10 +12,11 @@ from PySide6.QtWidgets import (
 )
 
 from ..core import parse_tracklist_with_template
+from ..llm import is_llm_configured
 from ..core.settings import get_settings
 from ..models import DownloadJob
 from ..utils import is_ffmpeg_available, is_valid_youtube_url
-from ..workers import PipelineWorker, VideoInfoWorker
+from ..workers import PipelineWorker, TracklistAiWorker, VideoInfoWorker
 from .widgets import (
     DirectoryPickerWidget,
     MetadataInputWidget,
@@ -37,6 +38,8 @@ class MainWindow(QMainWindow):
         self._thread_pool = QThreadPool()
         self._current_worker: PipelineWorker | None = None
         self._video_info_worker: VideoInfoWorker | None = None
+        self._tracklist_ai_worker: TracklistAiWorker | None = None
+        self._ai_analyzing = False
         self._url_debounce_timer = QTimer()
         self._url_debounce_timer.setSingleShot(True)
         self._url_debounce_timer.timeout.connect(self._fetch_video_info)
@@ -115,12 +118,74 @@ class MainWindow(QMainWindow):
         dialog = SettingsDialog(self)
         if dialog.exec():
             self._check_ffmpeg()
+            self._update_ai_availability()
+
+    def _update_ai_availability(self) -> None:
+        """Enable the AI button when inputs and LLM settings are ready."""
+        has_tracklist = bool(self._tracklist_input.get_text().strip())
+        has_video = self._video_preview.get_video_info() is not None
+        configured = is_llm_configured(get_settings())
+        self._tracklist_input.set_ai_available(
+            has_tracklist and has_video and configured and not self._ai_analyzing
+        )
+
+    def _on_ai_requested(self) -> None:
+        """Run LLM analysis on the raw track list."""
+        if self._ai_analyzing:
+            return
+
+        video_info = self._video_preview.get_video_info()
+        if video_info is None:
+            QMessageBox.warning(
+                self,
+                "AI Assist",
+                "Please wait for video info to load before using AI.",
+            )
+            return
+
+        raw_tracklist = self._tracklist_input.get_text()
+        if not raw_tracklist.strip():
+            return
+
+        self._ai_analyzing = True
+        self._tracklist_input.set_ai_loading(True)
+        self._update_ai_availability()
+
+        self._tracklist_ai_worker = TracklistAiWorker(
+            get_settings(),
+            video_info.title,
+            raw_tracklist,
+        )
+        self._tracklist_ai_worker.signals.finished.connect(self._on_ai_finished)
+        self._tracklist_ai_worker.signals.error.connect(self._on_ai_error)
+        self._thread_pool.start(self._tracklist_ai_worker)
+
+    def _on_ai_finished(self, result) -> None:
+        """Apply LLM extraction results to the form."""
+        self._ai_analyzing = False
+        self._tracklist_input.set_ai_loading(False)
+        self._tracklist_input.set_template(result.template)
+        if result.artist_name:
+            self._metadata_input.set_artist(result.artist_name)
+        if result.album_name:
+            self._metadata_input.set_album(result.album_name)
+        self._update_ai_availability()
+
+    def _on_ai_error(self, message: str) -> None:
+        """Display an AI extraction error."""
+        self._ai_analyzing = False
+        self._tracklist_input.set_ai_loading(False)
+        self._update_ai_availability()
+        QMessageBox.critical(self, "AI Assist", message)
 
     def _connect_signals(self) -> None:
         """Connect widget signals to slots."""
         self._start_button.clicked.connect(self._on_start_clicked)
         self._cancel_button.clicked.connect(self._on_cancel_clicked)
         self._url_input.url_changed.connect(self._on_url_changed)
+        self._tracklist_input.tracklist_changed.connect(self._update_ai_availability)
+        self._tracklist_input.ai_requested.connect(self._on_ai_requested)
+        self._update_ai_availability()
 
     def _check_ffmpeg(self) -> None:
         """Check if ffmpeg is available."""
@@ -144,10 +209,12 @@ class MainWindow(QMainWindow):
         if not url:
             self._video_preview.clear()
             self._last_fetched_url = ""
+            self._update_ai_availability()
             return
 
         if not is_valid_youtube_url(url):
             self._video_preview.clear()
+            self._update_ai_availability()
             return
 
         if url == self._last_fetched_url:
@@ -179,11 +246,13 @@ class MainWindow(QMainWindow):
         self._video_preview.set_video_info(info)
         # Set default album name to video title
         self._metadata_input.set_album_placeholder(info.title)
+        self._update_ai_availability()
 
     def _on_video_info_error(self, message: str) -> None:
         """Handle video info fetch error."""
         self._video_preview.set_error(message)
         self._url_input.set_error(message)
+        self._update_ai_availability()
 
     def _on_start_clicked(self) -> None:
         """Validate inputs and start pipeline worker."""
