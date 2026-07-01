@@ -52,7 +52,35 @@ jobs:
         run: uv sync --dev
 
       - name: Build executable with pyside6-deploy
-        run: uv run pyside6-deploy main.py --force
+        run: uv run pyside6-deploy main.py --force -v
+
+      # pyside6-deploy finalize() expects deployment\main.exe, but on Windows the
+      # Nuitka command is often too long and gets rewritten to deploy_main.py,
+      # producing deployment\deploy_main.exe instead. Stage the built exe for packaging.
+      - name: Stage Windows executable
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $candidates = @(
+            "YouTubeBootlegger.exe",
+            "deployment\main.exe",
+            "deployment\deploy_main.exe"
+          )
+          $exe = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $exe) {
+            $found = Get-ChildItem -Path deployment -Filter *.exe -ErrorAction SilentlyContinue |
+              Select-Object -First 1
+            if ($found) { $exe = $found.FullName }
+          }
+          if (-not $exe) {
+            Write-Error "No Windows executable found after pyside6-deploy build"
+            Get-ChildItem -Recurse -Include *.exe | ForEach-Object { Write-Host $_.FullName }
+            exit 1
+          }
+          if ($exe -ne "YouTubeBootlegger.exe") {
+            Copy-Item $exe "YouTubeBootlegger.exe" -Force
+            Write-Host "Staged executable from $exe"
+          }
 
       - name: Package artifact (Linux)
         if: runner.os == 'Linux'
