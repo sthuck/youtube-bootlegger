@@ -208,8 +208,13 @@ class AppBackend(QObject):
 
     def _refresh_ai_available(self):
         has_tracklist = bool(self._tracklist_text.strip())
+        has_video = self._video_info is not None
         configured = is_llm_configured(self._app_settings)
-        self._emit("_ai_available", has_tracklist and configured, self.aiAvailableChanged)
+        self._emit(
+            "_ai_available",
+            has_tracklist and has_video and configured and not self._ai_analyzing,
+            self.aiAvailableChanged,
+        )
 
     def _refresh_llm_configured(self):
         self._emit(
@@ -531,12 +536,14 @@ class AppBackend(QObject):
         self._emit("_video_loaded", True, self.videoLoadedChanged)
         self._emit("_video_error", "", self.videoErrorChanged)
         self._emit("_album_placeholder", info.title, self.albumPlaceholderChanged)
+        self._refresh_ai_available()
 
     def _on_video_info_error(self, message: str):
         self._emit("_video_error", message, self.videoErrorChanged)
         self._emit("_video_loading", False, self.videoLoadingChanged)
         self._emit("_video_loaded", False, self.videoLoadedChanged)
         self._emit("_url_error", message, self.urlErrorChanged)
+        self._refresh_ai_available()
 
     def _set_video_loading(self):
         self._video_info = None
@@ -548,6 +555,7 @@ class AppBackend(QObject):
         self._emit("_video_loading", True, self.videoLoadingChanged)
         self._emit("_video_loaded", False, self.videoLoadedChanged)
         self._emit("_video_error", "", self.videoErrorChanged)
+        self._refresh_ai_available()
 
     def _clear_video(self):
         self._video_info = None
@@ -563,6 +571,7 @@ class AppBackend(QObject):
             self._emit(attr, "", sig)
         self._emit("_video_loading", False, self.videoLoadingChanged)
         self._emit("_video_loaded", False, self.videoLoadedChanged)
+        self._refresh_ai_available()
 
     # ── Preview ─────────────────────────────────────────────────────
 

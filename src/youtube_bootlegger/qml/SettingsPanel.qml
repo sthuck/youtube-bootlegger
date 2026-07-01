@@ -179,7 +179,7 @@ Item {
                 }
 
                 Text {
-                    text: "Choose one provider. Credentials are stored locally."
+                    text: "Choose one provider. Credentials are stored locally. Track list text and video title are sent to the selected provider."
                     color: root.colors.textMuted
                     font.pixelSize: 11
                     wrapMode: Text.Wrap
@@ -188,9 +188,10 @@ Item {
 
                 Repeater {
                     model: [
+                        { id: "none", label: "Disabled" },
                         { id: "openai", label: "OpenAI" },
                         { id: "anthropic", label: "Anthropic" },
-                        { id: "vertex", label: "Vertex AI" },
+                        { id: "vertex", label: "Google Gemini (API key)" },
                         { id: "openai_compatible", label: "OpenAI compatible" }
                     ]
                     delegate: Rectangle {
@@ -253,7 +254,7 @@ Item {
                             onEditingFinished: backend.setOpenaiModel(text)
                             Text {
                                 anchors.fill: parent; verticalAlignment: Text.AlignVCenter
-                                text: "gpt-5.4-mini"
+                                text: "gpt-4o-mini"
                                 color: root.colors.textMuted; font.pixelSize: 12
                                 visible: !openaiModelField.text && !openaiModelField.activeFocus
                             }
@@ -299,7 +300,7 @@ Item {
                             onEditingFinished: backend.setAnthropicModel(text)
                             Text {
                                 anchors.fill: parent; verticalAlignment: Text.AlignVCenter
-                                text: "claude-sonnet-5"
+                                text: "claude-sonnet-4-20250514"
                                 color: root.colors.textMuted; font.pixelSize: 12
                                 visible: !anthropicModelField.text && !anthropicModelField.activeFocus
                             }
@@ -313,7 +314,7 @@ Item {
                     visible: backend.llmProvider === "vertex"
                     opacity: visible ? 1.0 : 0.0
 
-                    Text { text: "Vertex AI API key"; color: root.colors.textMuted; font.pixelSize: 12 }
+                    Text { text: "Google AI Studio API key"; color: root.colors.textMuted; font.pixelSize: 12 }
                     Rectangle {
                         Layout.fillWidth: true; height: 36
                         color: root.colors.inputBg; radius: root.colors.radiusSm

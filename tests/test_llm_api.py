@@ -15,6 +15,7 @@ from src.youtube_bootlegger.llm import (
     is_llm_configured,
     parse_extraction_response,
     resolve_litellm_model,
+    validate_extraction,
 )
 from src.youtube_bootlegger.core.settings import AppSettings, LlmProvider
 
@@ -79,13 +80,20 @@ class TestResolveLitellmModel:
     def test_anthropic_prefixes_model(self):
         settings = make_settings(
             llm_provider=LlmProvider.ANTHROPIC,
-            anthropic_model="claude-sonnet-5",
+            anthropic_model="claude-sonnet-4-20250514",
         )
-        assert resolve_litellm_model(settings) == "anthropic/claude-sonnet-5"
+        assert resolve_litellm_model(settings) == "anthropic/claude-sonnet-4-20250514"
 
-    def test_vertex_prefixes_model(self):
+    def test_vertex_uses_gemini_prefix_for_api_key_auth(self):
         settings = make_settings(llm_provider=LlmProvider.VERTEX)
-        assert resolve_litellm_model(settings) == f"vertex_ai/{DEFAULT_VERTEX_MODEL}"
+        assert resolve_litellm_model(settings) == f"gemini/{DEFAULT_VERTEX_MODEL}"
+
+    def test_vertex_converts_legacy_vertex_ai_prefix(self):
+        settings = make_settings(
+            llm_provider=LlmProvider.VERTEX,
+            vertex_model="vertex_ai/gemini-2.0-flash",
+        )
+        assert resolve_litellm_model(settings) == "gemini/gemini-2.0-flash"
 
 
 class TestBuildLitellmKwargs:
@@ -93,10 +101,10 @@ class TestBuildLitellmKwargs:
         settings = make_settings(
             llm_provider=LlmProvider.OPENAI,
             openai_api_key="sk-test",
-            openai_model="gpt-5.4-mini",
+            openai_model=DEFAULT_OPENAI_MODEL,
         )
         kwargs = build_litellm_kwargs(settings)
-        assert kwargs["model"] == "gpt-5.4-mini"
+        assert kwargs["model"] == DEFAULT_OPENAI_MODEL
         assert kwargs["api_key"] == "sk-test"
 
     def test_compatible_kwargs_include_base_url(self):
@@ -126,6 +134,15 @@ class TestParseExtractionResponse:
         assert result.artist_name == "Phish"
         assert result.album_name == "NYE 2023"
 
+    def test_parses_dict_payload(self):
+        payload = {
+            "template": "%songname% - %mm%:%ss%",
+            "artist_name": "Phish",
+            "album_name": "NYE 2023",
+        }
+        result = parse_extraction_response(payload)
+        assert result.template == "%songname% - %mm%:%ss%"
+
     def test_rejects_invalid_json(self):
         with pytest.raises(LlmExtractionError, match="invalid JSON"):
             parse_extraction_response("not-json")
@@ -142,6 +159,38 @@ class TestParseExtractionResponse:
             parse_extraction_response(payload)
 
 
+class TestValidateExtraction:
+    def test_accepts_matching_template(self):
+        extraction = TracklistExtraction(
+            template="%songname% - %mm%:%ss%",
+            artist_name="Phish",
+            album_name="NYE 2023",
+        )
+        result = validate_extraction(
+            extraction,
+            "Tweezer - 0:00\nHarry Hood - 12:34",
+        )
+        assert result.template == "%songname% - %mm%:%ss%"
+
+    def test_rejects_invalid_template_syntax(self):
+        extraction = TracklistExtraction(
+            template="%songname%",
+            artist_name="Phish",
+            album_name="NYE 2023",
+        )
+        with pytest.raises(LlmExtractionError, match="invalid template"):
+            validate_extraction(extraction, "Tweezer - 0:00")
+
+    def test_rejects_template_that_does_not_match_tracklist(self):
+        extraction = TracklistExtraction(
+            template="[%mm%:%ss%] %songname%",
+            artist_name="Phish",
+            album_name="NYE 2023",
+        )
+        with pytest.raises(LlmExtractionError, match="does not match the track list"):
+            validate_extraction(extraction, "Tweezer - 0:00\nHarry Hood - 12:34")
+
+
 class TestExtractTracklistMetadata:
     def test_requires_configured_provider(self):
         settings = make_settings(llm_provider=LlmProvider.NONE)
@@ -155,6 +204,14 @@ class TestExtractTracklistMetadata:
         )
         with pytest.raises(LlmExtractionError, match="empty"):
             extract_tracklist_metadata(settings, "Show Title", "   ")
+
+    def test_requires_video_title(self):
+        settings = make_settings(
+            llm_provider=LlmProvider.OPENAI,
+            openai_api_key="sk-test",
+        )
+        with pytest.raises(LlmExtractionError, match="Video title is required"):
+            extract_tracklist_metadata(settings, "   ", "Song - 0:00")
 
     def test_calls_completion_fn_and_parses_response(self):
         settings = make_settings(
@@ -199,6 +256,38 @@ class TestExtractTracklistMetadata:
         assert captured["api_key"] == "sk-test"
         assert captured["response_format"] is TracklistExtraction
         assert captured["messages"][1]["content"].startswith("YouTube Bootlegger")
+
+    def test_rejects_llm_template_that_does_not_parse_tracklist(self):
+        settings = make_settings(
+            llm_provider=LlmProvider.OPENAI,
+            openai_api_key="sk-test",
+        )
+
+        class FakeChoice:
+            def __init__(self, content):
+                self.message = type("Message", (), {"content": content})()
+
+        class FakeResponse:
+            def __init__(self, content):
+                self.choices = [FakeChoice(content)]
+
+        def fake_completion(**_kwargs):
+            content = json.dumps(
+                {
+                    "template": "%songname% - %mm%:%ss%",
+                    "artist_name": "The Band",
+                    "album_name": "Live",
+                }
+            )
+            return FakeResponse(content)
+
+        with pytest.raises(LlmExtractionError, match="does not match the track list"):
+            extract_tracklist_metadata(
+                settings,
+                "Show",
+                "[0:00] Opener\n[5:00] Closer",
+                completion_fn=fake_completion,
+            )
 
     def test_wraps_completion_errors(self):
         settings = make_settings(

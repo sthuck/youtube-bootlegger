@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
+    QLabel,
     QLineEdit,
     QFileDialog,
     QPushButton,
@@ -77,13 +78,15 @@ class SettingsDialog(QDialog):
 
         self._llm_button_group = QButtonGroup(self)
 
+        self._none_radio = QRadioButton("Disabled")
         self._openai_radio = QRadioButton("OpenAI")
         self._anthropic_radio = QRadioButton("Anthropic")
-        self._vertex_radio = QRadioButton("Vertex AI")
+        self._vertex_radio = QRadioButton("Google Gemini (API key)")
         self._compatible_radio = QRadioButton("OpenAI compatible")
 
         for index, radio in enumerate(
             (
+                self._none_radio,
                 self._openai_radio,
                 self._anthropic_radio,
                 self._vertex_radio,
@@ -92,6 +95,14 @@ class SettingsDialog(QDialog):
         ):
             self._llm_button_group.addButton(radio, index)
             llm_layout.addWidget(radio)
+
+        llm_note = QLabel(
+            "Credentials are stored locally. Track list text and video title "
+            "are sent to the selected provider."
+        )
+        llm_note.setWordWrap(True)
+        llm_note.setStyleSheet("color: gray; font-size: 11px;")
+        llm_layout.addWidget(llm_note)
 
         self._openai_api_key = QLineEdit()
         self._openai_api_key.setEchoMode(QLineEdit.EchoMode.Password)
@@ -131,7 +142,7 @@ class SettingsDialog(QDialog):
         llm_layout.addWidget(self._anthropic_form_widget)
 
         vertex_form = QFormLayout()
-        vertex_form.addRow("API key:", self._vertex_api_key)
+        vertex_form.addRow("Google AI Studio API key:", self._vertex_api_key)
         vertex_form.addRow("Model:", self._vertex_model)
         self._vertex_form_widget = QWidget()
         self._vertex_form_widget.setLayout(vertex_form)
@@ -211,7 +222,9 @@ class SettingsDialog(QDialog):
         for provider, (_radio, form_widget) in self._llm_provider_fields.items():
             form_widget.setVisible(provider == active)
 
-    def _selected_llm_provider(self) -> LlmProvider | None:
+    def _selected_llm_provider(self) -> LlmProvider:
+        if self._none_radio.isChecked():
+            return LlmProvider.NONE
         if self._openai_radio.isChecked():
             return LlmProvider.OPENAI
         if self._anthropic_radio.isChecked():
@@ -220,7 +233,7 @@ class SettingsDialog(QDialog):
             return LlmProvider.VERTEX
         if self._compatible_radio.isChecked():
             return LlmProvider.OPENAI_COMPATIBLE
-        return None
+        return LlmProvider.NONE
 
     def _load_settings(self) -> None:
         """Populate the form from the current persisted settings."""
@@ -241,14 +254,14 @@ class SettingsDialog(QDialog):
 
         provider = self._settings.llm_provider
         radio_map = {
+            LlmProvider.NONE: self._none_radio,
             LlmProvider.OPENAI: self._openai_radio,
             LlmProvider.ANTHROPIC: self._anthropic_radio,
             LlmProvider.VERTEX: self._vertex_radio,
             LlmProvider.OPENAI_COMPATIBLE: self._compatible_radio,
         }
-        radio = radio_map.get(provider)
-        if radio is not None:
-            radio.setChecked(True)
+        radio = radio_map.get(provider, self._none_radio)
+        radio.setChecked(True)
         self._update_llm_field_visibility()
 
     def _on_save(self) -> None:
@@ -267,8 +280,7 @@ class SettingsDialog(QDialog):
         self._settings.compatible_bearer_token = self._compatible_bearer_token.text()
         self._settings.compatible_model = self._compatible_model.text()
 
-        selected = self._selected_llm_provider()
-        self._settings.llm_provider = selected or LlmProvider.NONE
+        self._settings.llm_provider = self._selected_llm_provider()
 
         self._settings.sync()
         self.accept()

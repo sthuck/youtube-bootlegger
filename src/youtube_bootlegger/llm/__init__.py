@@ -13,6 +13,7 @@ from .llm_api import (
     is_llm_configured,
     parse_extraction_response,
     resolve_litellm_model,
+    validate_extraction,
 )
 from .prompt import build_extraction_prompt
 
@@ -30,4 +31,5 @@ __all__ = [
     "is_llm_configured",
     "parse_extraction_response",
     "resolve_litellm_model",
+    "validate_extraction",
 ]

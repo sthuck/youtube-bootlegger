@@ -8,11 +8,11 @@ from typing import Any
 from pydantic import BaseModel, Field, ValidationError
 
 from ..core.settings import AppSettings, LlmProvider
-from ..core.template_parser import DEFAULT_TEMPLATE
+from ..core.template_parser import DEFAULT_TEMPLATE, preview_parse, validate_template
 from .prompt import SYSTEM_PROMPT, build_extraction_prompt
 
-DEFAULT_OPENAI_MODEL = "gpt-5.4-mini"
-DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-5"
+DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
+DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-20250514"
 DEFAULT_VERTEX_MODEL = "gemini-2.0-flash"
 DEFAULT_COMPATIBLE_MODEL = "gpt-4o-mini"
 
@@ -45,6 +45,16 @@ def is_llm_configured(settings: AppSettings) -> bool:
     return False
 
 
+def _resolve_gemini_model(model: str) -> str:
+    """Return a litellm model id for Google AI Studio (API key) Gemini models."""
+    resolved = model or DEFAULT_VERTEX_MODEL
+    if resolved.startswith("gemini/"):
+        return resolved
+    if resolved.startswith("vertex_ai/"):
+        resolved = resolved.split("/", 1)[1]
+    return f"gemini/{resolved}"
+
+
 def resolve_litellm_model(settings: AppSettings) -> str:
     """Return the litellm model identifier for the active provider."""
     provider = settings.llm_provider
@@ -54,8 +64,7 @@ def resolve_litellm_model(settings: AppSettings) -> str:
         model = settings.anthropic_model or DEFAULT_ANTHROPIC_MODEL
         return model if model.startswith("anthropic/") else f"anthropic/{model}"
     if provider == LlmProvider.VERTEX:
-        model = settings.vertex_model or DEFAULT_VERTEX_MODEL
-        return model if model.startswith("vertex_ai/") else f"vertex_ai/{model}"
+        return _resolve_gemini_model(settings.vertex_model)
     return settings.compatible_model or DEFAULT_COMPATIBLE_MODEL
 
 
@@ -81,12 +90,19 @@ def build_litellm_kwargs(settings: AppSettings) -> dict[str, Any]:
     return kwargs
 
 
-def parse_extraction_response(content: str) -> TracklistExtraction:
+def parse_extraction_response(content: str | dict[str, Any]) -> TracklistExtraction:
     """Parse and validate structured LLM output."""
-    try:
-        payload = json.loads(content)
-    except json.JSONDecodeError as exc:
-        raise LlmExtractionError(f"LLM returned invalid JSON: {exc}") from exc
+    if isinstance(content, dict):
+        payload = content
+    elif isinstance(content, str):
+        try:
+            payload = json.loads(content)
+        except json.JSONDecodeError as exc:
+            raise LlmExtractionError(f"LLM returned invalid JSON: {exc}") from exc
+    else:
+        raise LlmExtractionError(
+            f"LLM returned unexpected response type: {type(content).__name__}"
+        )
 
     try:
         result = TracklistExtraction.model_validate(payload)
@@ -102,6 +118,30 @@ def parse_extraction_response(content: str) -> TracklistExtraction:
         artist_name=result.artist_name.strip(),
         album_name=result.album_name.strip(),
     )
+
+
+def validate_extraction(
+    extraction: TracklistExtraction,
+    raw_tracklist: str,
+) -> TracklistExtraction:
+    """Ensure the LLM template is valid and parses the user's track list."""
+    template_validation = validate_template(extraction.template)
+    if not template_validation.is_valid:
+        raise LlmExtractionError(
+            f"LLM returned invalid template: {template_validation.error}"
+        )
+
+    preview = preview_parse(raw_tracklist, extraction.template)
+    if preview.total_lines == 0:
+        raise LlmExtractionError("Track list has no parseable lines")
+
+    if preview.error_count > 0:
+        raise LlmExtractionError(
+            "LLM template does not match the track list "
+            f"({preview.error_count} of {preview.total_lines} lines failed to parse)"
+        )
+
+    return extraction
 
 
 def extract_tracklist_metadata(
@@ -158,10 +198,11 @@ def extract_tracklist_metadata(
     except (AttributeError, IndexError, TypeError) as exc:
         raise LlmExtractionError("LLM returned an unexpected response shape") from exc
 
-    if not content:
+    if content is None or content == "":
         raise LlmExtractionError("LLM returned an empty response")
 
-    return parse_extraction_response(content)
+    extraction = parse_extraction_response(content)
+    return validate_extraction(extraction, raw_tracklist)
 
 
 def fallback_template() -> str:
