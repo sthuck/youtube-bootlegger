@@ -7,6 +7,7 @@ from pathlib import Path
 from ..models import Track
 from ..utils import format_seconds_to_timestamp, sanitize_filename
 from .exceptions import FFmpegNotFoundError, SplitError
+from .settings import AppSettings, get_settings
 
 
 class AudioSplitter:
@@ -16,15 +17,18 @@ class AudioSplitter:
         self,
         progress_callback: Callable[[int, int, str], None] | None = None,
         log_callback: Callable[[str], None] | None = None,
+        settings: AppSettings | None = None,
     ):
         """Initialize the splitter.
 
         Args:
             progress_callback: Callback for progress (current, total, track_name).
             log_callback: Callback for log messages.
+            settings: Application settings. Defaults to the shared singleton.
         """
         self._progress_callback = progress_callback
         self._log_callback = log_callback
+        self._ffmpeg_command = (settings or get_settings()).resolved_ffmpeg_command()
 
     def _log(self, message: str) -> None:
         """Emit a log message."""
@@ -77,14 +81,15 @@ class AudioSplitter:
         """Verify ffmpeg is available."""
         try:
             subprocess.run(
-                ["ffmpeg", "-version"],
+                [self._ffmpeg_command, "-version"],
                 capture_output=True,
                 check=True,
                 timeout=5,
             )
         except FileNotFoundError as e:
             raise FFmpegNotFoundError(
-                "FFmpeg not found. Please install FFmpeg and ensure it's in your PATH."
+                f"FFmpeg not found at '{self._ffmpeg_command}'. Please install FFmpeg, "
+                "ensure it's in your PATH, or set a custom path in Settings."
             ) from e
         except subprocess.SubprocessError as e:
             raise FFmpegNotFoundError(f"FFmpeg check failed: {e}") from e
@@ -99,7 +104,7 @@ class AudioSplitter:
         start_time = format_seconds_to_timestamp(track.start_seconds)
 
         cmd = [
-            "ffmpeg",
+            self._ffmpeg_command,
             "-y",
             "-i",
             str(input_file),

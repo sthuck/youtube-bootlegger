@@ -3,6 +3,7 @@
 from .validators import is_valid_youtube_url, is_valid_timestamp, sanitize_filename
 from .time_utils import parse_timestamp_to_seconds, format_seconds_to_timestamp
 from .ffmpeg_check import is_ffmpeg_available
+from .ytdlp_check import is_ytdlp_available
 
 __all__ = [
     "is_valid_youtube_url",
@@ -11,4 +12,5 @@ __all__ = [
     "parse_timestamp_to_seconds",
     "format_seconds_to_timestamp",
     "is_ffmpeg_available",
+    "is_ytdlp_available",
 ]

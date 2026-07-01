@@ -11,6 +11,7 @@ from .exceptions import (
 from .downloader import AudioDownloader
 from .splitter import AudioSplitter
 from .pipeline import DownloadSplitPipeline
+from .settings import AppSettings, get_settings
 from .video_info import VideoInfo, fetch_video_info
 from .template_parser import (
     DEFAULT_TEMPLATE,
@@ -32,6 +33,8 @@ __all__ = [
     "AudioDownloader",
     "AudioSplitter",
     "DownloadSplitPipeline",
+    "AppSettings",
+    "get_settings",
     "VideoInfo",
     "fetch_video_info",
     "DEFAULT_TEMPLATE",
