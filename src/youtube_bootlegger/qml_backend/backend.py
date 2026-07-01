@@ -18,6 +18,7 @@ from ..core import (
     preview_parse,
     validate_template,
 )
+from ..core.settings import get_settings
 from ..core.video_info import VideoInfo
 from ..models import DownloadJob
 from ..utils import is_ffmpeg_available, is_valid_youtube_url
@@ -56,6 +57,7 @@ class AppBackend(QObject):
     previewStatusChanged = Signal()
     previewValidChanged = Signal()
     albumPlaceholderChanged = Signal()
+    metadataErrorChanged = Signal()
     outputDirChanged = Signal()
     dirErrorChanged = Signal()
     busyChanged = Signal()
@@ -63,6 +65,9 @@ class AppBackend(QObject):
     progressStageChanged = Signal()
     ffmpegMissingChanged = Signal()
     defaultTemplateChanged = Signal()
+    useExternalYtdlpChanged = Signal()
+    ytdlpPathChanged = Signal()
+    ffmpegPathChanged = Signal()
 
     showMessage = Signal(str, str, bool)  # title, message, isError
 
@@ -81,6 +86,7 @@ class AppBackend(QObject):
     previewStatus = Property(str, _getter("_preview_status"), notify=previewStatusChanged)
     previewValid = Property(bool, _getter("_preview_valid"), notify=previewValidChanged)
     albumPlaceholder = Property(str, _getter("_album_placeholder"), notify=albumPlaceholderChanged)
+    metadataError = Property(str, _getter("_metadata_error"), notify=metadataErrorChanged)
     outputDir = Property(str, _getter("_output_dir"), notify=outputDirChanged)
     dirError = Property(str, _getter("_dir_error"), notify=dirErrorChanged)
     busy = Property(bool, _getter("_busy"), notify=busyChanged)
@@ -88,6 +94,9 @@ class AppBackend(QObject):
     progressStage = Property(str, _getter("_progress_stage"), notify=progressStageChanged)
     ffmpegMissing = Property(bool, _getter("_ffmpeg_missing"), notify=ffmpegMissingChanged)
     defaultTemplate = Property(str, _getter("_default_template"), notify=defaultTemplateChanged)
+    useExternalYtdlp = Property(bool, _getter("_use_external_ytdlp"), notify=useExternalYtdlpChanged)
+    ytdlpPath = Property(str, _getter("_ytdlp_path"), notify=ytdlpPathChanged)
+    ffmpegPath = Property(str, _getter("_ffmpeg_path"), notify=ffmpegPathChanged)
 
     trackPreviewModel = Property(QObject, _getter("_track_model"), constant=True)
     statusLogModel = Property(QObject, _getter("_log_model"), constant=True)
@@ -124,12 +133,18 @@ class AppBackend(QObject):
         self._artist = ""
         self._album = ""
         self._album_placeholder = "Defaults to video title"
+        self._metadata_error = ""
         self._output_dir = str(Path.home() / "Music")
         self._dir_error = ""
         self._busy = False
         self._progress_percent = 0.0
         self._progress_stage = "Ready"
-        self._ffmpeg_missing = not is_ffmpeg_available()
+
+        self._app_settings = get_settings()
+        self._use_external_ytdlp = self._app_settings.use_external_ytdlp
+        self._ytdlp_path = self._app_settings.ytdlp_path
+        self._ffmpeg_path = self._app_settings.ffmpeg_path
+        self._ffmpeg_missing = not is_ffmpeg_available(self._app_settings.resolved_ffmpeg_command())
 
         self._track_model = TrackPreviewModel(self)
         self._log_model = StatusLogModel(self)
@@ -180,20 +195,46 @@ class AppBackend(QObject):
     @Slot(str)
     def setArtist(self, text):
         self._artist = text.strip()
+        self._emit("_metadata_error", "", self.metadataErrorChanged)
 
     @Slot(str)
     def setAlbum(self, text):
         self._album = text.strip()
+        self._emit("_metadata_error", "", self.metadataErrorChanged)
 
     @Slot(str)
     def setOutputDir(self, path):
         self._output_dir = path
         self._emit("_dir_error", "", self.dirErrorChanged)
 
+    @Slot(bool)
+    def setUseExternalYtdlp(self, enabled):
+        self._app_settings.use_external_ytdlp = enabled
+        self._app_settings.sync()
+        self._emit("_use_external_ytdlp", enabled, self.useExternalYtdlpChanged)
+
+    @Slot(str)
+    def setYtdlpPath(self, path):
+        self._app_settings.ytdlp_path = path
+        self._app_settings.sync()
+        self._emit("_ytdlp_path", self._app_settings.ytdlp_path, self.ytdlpPathChanged)
+
+    @Slot(str)
+    def setFfmpegPath(self, path):
+        self._app_settings.ffmpeg_path = path
+        self._app_settings.sync()
+        self._emit("_ffmpeg_path", self._app_settings.ffmpeg_path, self.ffmpegPathChanged)
+        self._emit(
+            "_ffmpeg_missing",
+            not is_ffmpeg_available(self._app_settings.resolved_ffmpeg_command()),
+            self.ffmpegMissingChanged,
+        )
+
     @Slot()
     def startPipeline(self):
         self._emit("_url_error", "", self.urlErrorChanged)
         self._emit("_dir_error", "", self.dirErrorChanged)
+        self._emit("_metadata_error", "", self.metadataErrorChanged)
 
         if not self._url:
             self._emit("_url_error", "Please enter a YouTube URL", self.urlErrorChanged)
@@ -224,6 +265,14 @@ class AppBackend(QObject):
             if not tracks:
                 return
         except ParseError:
+            return
+
+        if not self._artist and not self._album:
+            self._emit(
+                "_metadata_error",
+                "Please enter an artist name or album name",
+                self.metadataErrorChanged,
+            )
             return
 
         if not self._output_dir.strip():
