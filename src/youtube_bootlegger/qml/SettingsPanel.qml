@@ -438,6 +438,7 @@ Item {
                 }
             }
         }
+        }
     }
 
     FileDialog {

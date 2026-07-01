@@ -1,6 +1,6 @@
 """Unit tests for persistent application settings."""
 
-from src.youtube_bootlegger.core.llm_extraction import (
+from src.youtube_bootlegger.llm import (
     DEFAULT_ANTHROPIC_MODEL,
     DEFAULT_OPENAI_MODEL,
     DEFAULT_VERTEX_MODEL,

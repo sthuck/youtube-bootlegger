@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ...core.llm_extraction import (
+from ...llm import (
     DEFAULT_ANTHROPIC_MODEL,
     DEFAULT_COMPATIBLE_MODEL,
     DEFAULT_OPENAI_MODEL,

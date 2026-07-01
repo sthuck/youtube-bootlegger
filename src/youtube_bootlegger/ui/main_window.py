@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..core import parse_tracklist_with_template
-from ..core.llm_extraction import is_llm_configured
+from ..llm import is_llm_configured
 from ..core.settings import get_settings
 from ..models import DownloadJob
 from ..utils import is_ffmpeg_available, is_valid_youtube_url

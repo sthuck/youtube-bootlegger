@@ -2,7 +2,7 @@
 
 from PySide6.QtCore import QObject, QRunnable, Signal
 
-from ..core.llm_extraction import LlmExtractionError, TracklistExtraction, extract_tracklist_metadata
+from ..llm import LlmExtractionError, TracklistExtraction, extract_tracklist_metadata
 from ..core.settings import AppSettings
 
 

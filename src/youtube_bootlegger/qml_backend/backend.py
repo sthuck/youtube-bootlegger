@@ -18,7 +18,7 @@ from ..core import (
     preview_parse,
     validate_template,
 )
-from ..core.llm_extraction import is_llm_configured
+from ..llm import is_llm_configured
 from ..core.settings import LlmProvider, get_settings
 from ..core.video_info import VideoInfo
 from ..models import DownloadJob

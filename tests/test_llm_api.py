@@ -1,16 +1,15 @@
-"""Unit tests for LLM tracklist extraction."""
+"""Unit tests for LLM API integration."""
 
 import json
 
 import pytest
 
-from src.youtube_bootlegger.core.llm_extraction import (
+from src.youtube_bootlegger.llm import (
     DEFAULT_ANTHROPIC_MODEL,
     DEFAULT_OPENAI_MODEL,
     DEFAULT_VERTEX_MODEL,
     LlmExtractionError,
     TracklistExtraction,
-    build_extraction_prompt,
     build_litellm_kwargs,
     extract_tracklist_metadata,
     is_llm_configured,
@@ -42,18 +41,6 @@ def make_settings(**kwargs) -> AppSettings:
     for key, value in kwargs.items():
         setattr(settings, key, value)
     return settings
-
-
-class TestBuildExtractionPrompt:
-    def test_includes_video_title_and_tracklist(self):
-        prompt = build_extraction_prompt(
-            "Phish - 12/31/2023",
-            "Tweezer - 0:00\nHarry Hood - 12:34",
-        )
-        assert "Phish - 12/31/2023" in prompt
-        assert "Tweezer - 0:00" in prompt
-        assert "%songname%" in prompt
-        assert "template" in prompt.lower()
 
 
 class TestIsLlmConfigured:
