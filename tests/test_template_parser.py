@@ -372,6 +372,72 @@ class TestTemplateVariations:
         assert result.total_seconds == 3600 + 1800 + 45
 
 
+class TestHoursTemplateParsing:
+    """Tests for %hh%:%mm%:%ss% templates where hours are required."""
+
+    HH_TEMPLATE = "%hh%:%mm%:%ss% - %songname%"
+
+    def test_parse_hh_mm_two_components(self):
+        """Two-part hh:mm timestamps should parse with seconds defaulting to 0."""
+        result = parse_line("50:25 - foo", self.HH_TEMPLATE, 1)
+        assert result.hours == 50
+        assert result.minutes == 25
+        assert result.seconds == 0
+        assert result.name == "foo"
+        assert result.total_seconds == 50 * 3600 + 25 * 60
+
+    def test_parse_hh_mm_ss_three_components(self):
+        """Three-part hh:mm:ss timestamps should parse normally."""
+        result = parse_line("01:05:30 - bar", self.HH_TEMPLATE, 1)
+        assert result.hours == 1
+        assert result.minutes == 5
+        assert result.seconds == 30
+        assert result.name == "bar"
+        assert result.total_seconds == 3930
+
+    def test_parse_multiple_lines_with_hh_template(self):
+        """Multiple lines with mixed hh:mm and hh:mm:ss formats."""
+        text = """50:25 - foo
+01:05:30 - bar"""
+        tracks = parse_tracklist_with_template(text, self.HH_TEMPLATE)
+
+        assert len(tracks) == 2
+        assert tracks[0].name == "bar"
+        assert tracks[0].start_seconds == 3930
+        assert tracks[0].end_seconds == 50 * 3600 + 25 * 60
+
+        assert tracks[1].name == "foo"
+        assert tracks[1].start_seconds == 50 * 3600 + 25 * 60
+        assert tracks[1].end_seconds is None
+
+    def test_hh_mm_not_interpreted_as_mm_ss(self):
+        """With %hh% in template, two-part times are hours:minutes not minutes:seconds."""
+        result = parse_line("5:30 - song", self.HH_TEMPLATE, 1)
+        assert result.hours == 5
+        assert result.minutes == 30
+        assert result.seconds == 0
+
+    def test_without_hh_template_two_part_is_mm_ss(self):
+        """Without %hh%, two-part times remain minutes:seconds."""
+        result = parse_line("50:25 - song", "%mm%:%ss% - %songname%", 1)
+        assert result.hours == 0
+        assert result.minutes == 50
+        assert result.seconds == 25
+
+    def test_hh_template_rejects_single_component(self):
+        """Single time component should not match hh:mm[:ss] template."""
+        with pytest.raises(ParseError):
+            parse_line("90 - song", self.HH_TEMPLATE, 1)
+
+    def test_songname_after_hours_template(self):
+        """Hours-first template with song name after time."""
+        result = parse_line("0:50:25 - baz", self.HH_TEMPLATE, 1)
+        assert result.hours == 0
+        assert result.minutes == 50
+        assert result.seconds == 25
+        assert result.name == "baz"
+
+
 class TestEdgeCases:
     """Tests for edge cases."""
 

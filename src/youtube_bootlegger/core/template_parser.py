@@ -8,9 +8,9 @@ Supports templates like:
 
 Placeholders:
 - %songname% - The song name (required)
-- %hh% - Hours (optional, 0 if not present)
+- %hh% - Hours (required when present in template; supports hh:mm or hh:mm:ss)
 - %mm% - Minutes (required)
-- %ss% - Seconds (required)
+- %ss% - Seconds (required in template; optional in input when %hh% is used)
 - %ignore:regex% - Match and ignore pattern (can use multiple)
 """
 
@@ -30,6 +30,21 @@ PLACEHOLDER_PATTERNS = {
 }
 
 REQUIRED_PLACEHOLDERS = {"%songname%", "%mm%", "%ss%"}
+
+# Consecutive time-placeholder runs are compiled into flexible patterns.
+# %hh%:%mm%:%ss% accepts hh:mm or hh:mm:ss; %mm%:%ss% accepts mm:ss only.
+TIME_RUN_REPLACEMENTS = (
+    (
+        "%hh%:%mm%:%ss%",
+        r"(?P<hh>\d{1,2}):(?P<mm>\d{1,2})(?::(?P<ss>\d{2}))?",
+        "@@TIME_HH_MM_SS@@",
+    ),
+    (
+        "%mm%:%ss%",
+        r"(?P<mm>\d{1,3}):(?P<ss>\d{2})",
+        "@@TIME_MM_SS@@",
+    ),
+)
 
 # Pattern to match %ignore:...% placeholders in templates
 IGNORE_PATTERN = re.compile(r"%ignore:(.+?)%")
@@ -129,10 +144,19 @@ def _compile_template(template: str) -> re.Pattern:
         replacement = f"(?:{ignore_regex})"
         ignore_replacements.append((full_match, replacement))
 
+    time_run_regexes: dict[str, str] = {}
+    for time_run, time_regex, marker in TIME_RUN_REPLACEMENTS:
+        if time_run in template:
+            template = template.replace(time_run, marker)
+            time_run_regexes[marker] = time_regex
+
     # Escape the template for regex
     pattern = re.escape(template)
 
-    # Replace standard placeholders
+    for marker, time_regex in time_run_regexes.items():
+        pattern = pattern.replace(re.escape(marker), time_regex)
+
+    # Replace standard placeholders not already handled by time runs
     for placeholder, regex in PLACEHOLDER_PATTERNS.items():
         escaped_placeholder = re.escape(placeholder)
         pattern = pattern.replace(escaped_placeholder, regex)
@@ -173,10 +197,18 @@ def parse_line(line: str, template: str, line_number: int) -> ParsedTrack:
     if not songname:
         raise ParseError(f"Line {line_number}: Song name is empty")
 
+    has_hours = "%hh%" in template
+
     try:
-        hours = int(groups.get("hh", 0) or 0)
         minutes = int(groups["mm"])
-        seconds = int(groups["ss"])
+        if has_hours:
+            if groups.get("hh") is None:
+                raise KeyError("hh")
+            hours = int(groups["hh"])
+            seconds = int(groups["ss"]) if groups.get("ss") is not None else 0
+        else:
+            hours = 0
+            seconds = int(groups["ss"])
     except (ValueError, KeyError) as e:
         raise ParseError(f"Line {line_number}: Invalid time format") from e
 
@@ -184,9 +216,6 @@ def parse_line(line: str, template: str, line_number: int) -> ParsedTrack:
         raise ParseError(
             f"Line {line_number}: Seconds must be less than 60 (got {seconds})"
         )
-
-    if minutes >= 60 and "%hh%" not in template:
-        pass
 
     return ParsedTrack(
         name=songname,
