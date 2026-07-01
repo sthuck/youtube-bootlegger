@@ -4,8 +4,10 @@ import signal
 import sys
 
 from PySide6.QtCore import QTimer
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
+from .resources import APP_LOGO_PNG
 from .ui import MainWindow
 
 
@@ -18,6 +20,7 @@ def create_app() -> tuple[QApplication, MainWindow]:
     app = QApplication(sys.argv)
     app.setApplicationName("YouTube Bootlegger")
     app.setApplicationVersion("0.1.0")
+    app.setWindowIcon(QIcon(str(APP_LOGO_PNG)))
 
     window = MainWindow()
     return app, window

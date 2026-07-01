@@ -16,7 +16,7 @@ exec_directory = .
 project_file = 
 
 # application icon
-icon = 
+icon = src/youtube_bootlegger/assets/logo.png
 
 [python]
 
