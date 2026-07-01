@@ -93,6 +93,14 @@ class MetadataInputWidget(QWidget):
         if title:
             self._album_input.setPlaceholderText(title)
 
+    def set_artist(self, artist: str) -> None:
+        """Set the artist field programmatically."""
+        self._artist_input.setText(artist)
+
+    def set_album(self, album: str) -> None:
+        """Set the album field programmatically."""
+        self._album_input.setText(album)
+
     def set_default_album(self, title: str) -> None:
         """Set the default album name if empty.
 

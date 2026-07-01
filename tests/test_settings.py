@@ -1,6 +1,11 @@
 """Unit tests for persistent application settings."""
 
-from src.youtube_bootlegger.core.settings import AppSettings
+from src.youtube_bootlegger.core.llm_extraction import (
+    DEFAULT_ANTHROPIC_MODEL,
+    DEFAULT_OPENAI_MODEL,
+    DEFAULT_VERTEX_MODEL,
+)
+from src.youtube_bootlegger.core.settings import AppSettings, LlmProvider
 
 
 class FakeSettingsBackend:
@@ -98,3 +103,64 @@ class TestResolvedCommands:
         settings = AppSettings(FakeSettingsBackend())
         settings.ffmpeg_path = "   "
         assert settings.resolved_ffmpeg_command() == "ffmpeg"
+
+
+class TestLlmSettingsDefaults:
+    def test_llm_provider_defaults_to_none(self):
+        settings = AppSettings(FakeSettingsBackend())
+        assert settings.llm_provider == LlmProvider.NONE
+
+    def test_llm_api_fields_default_to_empty(self):
+        settings = AppSettings(FakeSettingsBackend())
+        assert settings.openai_api_key == ""
+        assert settings.openai_model == ""
+        assert settings.anthropic_api_key == ""
+        assert settings.anthropic_model == ""
+        assert settings.vertex_api_key == ""
+        assert settings.vertex_model == ""
+        assert settings.compatible_base_url == ""
+        assert settings.compatible_bearer_token == ""
+        assert settings.compatible_model == ""
+
+
+class TestLlmSettingsRoundTrip:
+    def test_llm_provider_round_trip(self):
+        settings = AppSettings(FakeSettingsBackend())
+        settings.llm_provider = LlmProvider.OPENAI
+        assert settings.llm_provider == LlmProvider.OPENAI
+
+    def test_openai_settings_round_trip(self):
+        settings = AppSettings(FakeSettingsBackend())
+        settings.openai_api_key = "sk-test"
+        settings.openai_model = DEFAULT_OPENAI_MODEL
+        assert settings.openai_api_key == "sk-test"
+        assert settings.openai_model == DEFAULT_OPENAI_MODEL
+
+    def test_anthropic_settings_round_trip(self):
+        settings = AppSettings(FakeSettingsBackend())
+        settings.anthropic_api_key = "ant-test"
+        settings.anthropic_model = DEFAULT_ANTHROPIC_MODEL
+        assert settings.anthropic_api_key == "ant-test"
+        assert settings.anthropic_model == DEFAULT_ANTHROPIC_MODEL
+
+    def test_vertex_settings_round_trip(self):
+        settings = AppSettings(FakeSettingsBackend())
+        settings.vertex_api_key = "vertex-test"
+        settings.vertex_model = DEFAULT_VERTEX_MODEL
+        assert settings.vertex_api_key == "vertex-test"
+        assert settings.vertex_model == DEFAULT_VERTEX_MODEL
+
+    def test_compatible_settings_round_trip(self):
+        settings = AppSettings(FakeSettingsBackend())
+        settings.compatible_base_url = "https://example.com/v1"
+        settings.compatible_bearer_token = "token"
+        settings.compatible_model = "local-model"
+        assert settings.compatible_base_url == "https://example.com/v1"
+        assert settings.compatible_bearer_token == "token"
+        assert settings.compatible_model == "local-model"
+
+    def test_invalid_provider_value_falls_back_to_none(self):
+        backend = FakeSettingsBackend()
+        backend.setValue("llm/provider", "not-a-provider")
+        settings = AppSettings(backend)
+        assert settings.llm_provider == LlmProvider.NONE
