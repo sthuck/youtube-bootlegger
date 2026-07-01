@@ -11,8 +11,8 @@ from ..core.settings import AppSettings, LlmProvider
 from ..core.template_parser import DEFAULT_TEMPLATE, preview_parse, validate_template
 from .prompt import SYSTEM_PROMPT, build_extraction_prompt
 
-DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
-DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-20250514"
+DEFAULT_OPENAI_MODEL = "gpt-5.4-mini"
+DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-5"
 DEFAULT_VERTEX_MODEL = "gemini-2.0-flash"
 DEFAULT_COMPATIBLE_MODEL = "gpt-4o-mini"
 

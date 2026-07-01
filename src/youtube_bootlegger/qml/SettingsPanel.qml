@@ -254,7 +254,7 @@ Item {
                             onEditingFinished: backend.setOpenaiModel(text)
                             Text {
                                 anchors.fill: parent; verticalAlignment: Text.AlignVCenter
-                                text: "gpt-4o-mini"
+                                text: "gpt-5.4-mini"
                                 color: root.colors.textMuted; font.pixelSize: 12
                                 visible: !openaiModelField.text && !openaiModelField.activeFocus
                             }
@@ -300,7 +300,7 @@ Item {
                             onEditingFinished: backend.setAnthropicModel(text)
                             Text {
                                 anchors.fill: parent; verticalAlignment: Text.AlignVCenter
-                                text: "claude-sonnet-4-20250514"
+                                text: "claude-sonnet-5"
                                 color: root.colors.textMuted; font.pixelSize: 12
                                 visible: !anthropicModelField.text && !anthropicModelField.activeFocus
                             }

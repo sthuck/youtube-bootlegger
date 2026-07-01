@@ -80,9 +80,9 @@ class TestResolveLitellmModel:
     def test_anthropic_prefixes_model(self):
         settings = make_settings(
             llm_provider=LlmProvider.ANTHROPIC,
-            anthropic_model="claude-sonnet-4-20250514",
+            anthropic_model="claude-sonnet-5",
         )
-        assert resolve_litellm_model(settings) == "anthropic/claude-sonnet-4-20250514"
+        assert resolve_litellm_model(settings) == "anthropic/claude-sonnet-5"
 
     def test_vertex_uses_gemini_prefix_for_api_key_auth(self):
         settings = make_settings(llm_provider=LlmProvider.VERTEX)
