@@ -7,6 +7,8 @@ Item {
     required property QtObject colors
     property bool open: false
 
+    readonly property var help: backend.helpContent
+
     anchors.fill: parent
     visible: open
     z: 90
@@ -40,13 +42,13 @@ Item {
                 spacing: 20
 
                 Text {
-                    text: "How to Use YouTube Bootlegger"
+                    text: help.title
                     color: root.colors.text
                     font { pixelSize: 18; weight: Font.Bold }
                 }
 
                 Text {
-                    text: "Download live performance audio from YouTube, split it into individual songs using timestamped track lists, and save tagged MP3 files."
+                    text: help.intro
                     color: root.colors.textSec
                     font.pixelSize: 13
                     wrapMode: Text.Wrap
@@ -54,12 +56,12 @@ Item {
                 }
 
                 Text {
-                    text: "QUICK START"
+                    text: help.quickStartTitle
                     color: root.colors.textSec
                     font { pixelSize: 11; weight: Font.DemiBold; letterSpacing: 0.8 }
                 }
                 Text {
-                    text: "Follow these steps from top to bottom, left to right."
+                    text: help.quickStartIntro
                     color: root.colors.text
                     font.pixelSize: 13
                     wrapMode: Text.Wrap
@@ -67,20 +69,7 @@ Item {
                 }
 
                 Repeater {
-                    model: [
-                        { n: "1", title: "Paste a YouTube URL",
-                          body: "Enter a watch or youtu.be link in the URL field. The app fetches video info automatically and shows a preview with title, channel, duration, and thumbnail." },
-                        { n: "2", title: "Set the track list template",
-                          body: "Define how each line in your track list is formatted. The default template is %songname% - %mm%:%ss%. Adjust it if your timestamps or song names appear in a different order." },
-                        { n: "3", title: "Enter the track list",
-                          body: "Type one track per line, matching your template. The preview panel on the right validates each line — green rows are valid, red rows have errors (hover for details)." },
-                        { n: "4", title: "Fill in metadata",
-                          body: "Enter an artist name (required). Album is optional — if left blank, the video title is used when saving files." },
-                        { n: "5", title: "Choose an output directory",
-                          body: "Pick where to save files. Defaults to your Music folder. Songs are saved in a subfolder named Artist - Album." },
-                        { n: "6", title: "Start Download & Split",
-                          body: "The app downloads audio with yt-dlp, splits it at each timestamp with FFmpeg, and writes tagged MP3 files with cover art from the video thumbnail. Progress and status appear in the log panel." }
-                    ]
+                    model: help.steps
                     delegate: RowLayout {
                         required property var modelData
                         spacing: 12
@@ -117,12 +106,12 @@ Item {
                 }
 
                 Text {
-                    text: "TRACK LIST TEMPLATES"
+                    text: help.templateTitle
                     color: root.colors.textSec
                     font { pixelSize: 11; weight: Font.DemiBold; letterSpacing: 0.8 }
                 }
                 Text {
-                    text: "Each line in your track list must match the template. Available placeholders:"
+                    text: help.templateIntro
                     color: root.colors.text
                     font.pixelSize: 13
                     wrapMode: Text.Wrap
@@ -130,13 +119,7 @@ Item {
                 }
 
                 Repeater {
-                    model: [
-                        "%songname% — song title (required)",
-                        "%mm% — minutes (required)",
-                        "%ss% — seconds as two digits (required in template)",
-                        "%hh% — hours (only when timestamps include hours)",
-                        "%ignore:regex% — skip a pattern, e.g. %ignore:\\d+\\.% for track numbers"
-                    ]
+                    model: help.templatePlaceholders
                     delegate: RowLayout {
                         required property var modelData
                         spacing: 8
@@ -154,12 +137,7 @@ Item {
                 }
 
                 Repeater {
-                    model: [
-                        { label: "Default template", code: "%songname% - %mm%:%ss%" },
-                        { label: "Example track list", code: "Opening Number - 0:00\nSecond Song - 4:32\nThird Song - 8:15\nFinal Song - 12:47" },
-                        { label: "Hour-long sets (template: %hh%:%mm%:%ss% - %songname%)", code: "0:00 - Intro\n1:23:45 - Long Song\n2:05:30 - Encore" },
-                        { label: "Brackets around timestamps (template: [%mm%:%ss%] %songname%)", code: "[0:00] Opening Act\n[12:30] Main Set" }
-                    ]
+                    model: help.templateExamples
                     delegate: ColumnLayout {
                         required property var modelData
                         spacing: 4
@@ -189,7 +167,7 @@ Item {
                 }
 
                 Text {
-                    text: "When using %hh%:%mm%:%ss%, each line may use either hh:mm or hh:mm:ss. Only add %hh% when at least one timestamp has a real hour component — do not use it for mm:ss timestamps."
+                    text: help.templateNote
                     color: root.colors.textMuted
                     font.pixelSize: 12
                     wrapMode: Text.Wrap
@@ -197,12 +175,12 @@ Item {
                 }
 
                 Text {
-                    text: "AI ASSIST"
+                    text: help.aiTitle
                     color: root.colors.textSec
                     font { pixelSize: 11; weight: Font.DemiBold; letterSpacing: 0.8 }
                 }
                 Text {
-                    text: "Click the AI button next to the track list to auto-detect the best template, artist, and album from your raw track list and video title. Requires an LLM provider configured in Settings (gear icon). Track list text and video title are sent to the selected provider."
+                    text: help.aiBody
                     color: root.colors.text
                     font.pixelSize: 13
                     wrapMode: Text.Wrap
@@ -210,12 +188,12 @@ Item {
                 }
 
                 Text {
-                    text: "OUTPUT"
+                    text: help.outputTitle
                     color: root.colors.textSec
                     font { pixelSize: 11; weight: Font.DemiBold; letterSpacing: 0.8 }
                 }
                 Text {
-                    text: "Files are saved as MP3s in a subfolder under your chosen output directory:\n\n  OutputDir / Artist - Album / 01 - Song Name.mp3\n\nEach file includes artist, album, title, and track number tags, plus cover art from the video thumbnail."
+                    text: help.outputBody
                     color: root.colors.text
                     font.pixelSize: 13
                     wrapMode: Text.Wrap
@@ -223,16 +201,12 @@ Item {
                 }
 
                 Text {
-                    text: "REQUIREMENTS"
+                    text: help.requirementsTitle
                     color: root.colors.textSec
                     font { pixelSize: 11; weight: Font.DemiBold; letterSpacing: 0.8 }
                 }
                 Repeater {
-                    model: [
-                        "FFmpeg — required for splitting audio. Install it or set a custom path in Settings.",
-                        "yt-dlp — bundled with the app. An external binary is optional in Settings.",
-                        "LLM provider — optional, only needed for AI Assist."
-                    ]
+                    model: help.requirements
                     delegate: RowLayout {
                         required property var modelData
                         spacing: 8
@@ -250,18 +224,12 @@ Item {
                 }
 
                 Text {
-                    text: "TROUBLESHOOTING"
+                    text: help.troubleshootingTitle
                     color: root.colors.textSec
                     font { pixelSize: 11; weight: Font.DemiBold; letterSpacing: 0.8 }
                 }
                 Repeater {
-                    model: [
-                        "FFmpeg not found — install FFmpeg or set its path in Settings.",
-                        "Invalid URL — use a standard YouTube watch or youtu.be link.",
-                        "Red preview rows — a line does not match the template. Check placeholders and timestamp format.",
-                        "Cannot start — artist name is required. Fix any template or directory errors shown in red.",
-                        "Cancel — use the Cancel button while a download or split is in progress."
-                    ]
+                    model: help.troubleshooting
                     delegate: RowLayout {
                         required property var modelData
                         spacing: 8
