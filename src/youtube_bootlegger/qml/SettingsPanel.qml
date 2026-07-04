@@ -179,7 +179,7 @@ Item {
                 }
 
                 Text {
-                    text: "Choose one provider. Credentials are stored locally. Track list text and video title are sent to the selected provider."
+                    text: "Lite opens ChatGPT in your browser — no API key. Built-in providers send track list text and video title to the selected API using credentials stored locally."
                     color: root.colors.textMuted
                     font.pixelSize: 11
                     wrapMode: Text.Wrap
@@ -188,7 +188,7 @@ Item {
 
                 Repeater {
                     model: [
-                        { id: "none", label: "Disabled" },
+                        { id: "chatgpt_lite", label: "Lite (ChatGPT)" },
                         { id: "openai", label: "OpenAI" },
                         { id: "anthropic", label: "Anthropic" },
                         { id: "vertex", label: "Google Gemini (API key)" },

@@ -27,7 +27,8 @@ _COMPATIBLE_MODEL_KEY = "llm/compatible_model"
 class LlmProvider(StrEnum):
     """Supported LLM provider options (only one may be active)."""
 
-    NONE = "none"
+    NONE = "none"  # legacy; treated as CHATGPT_LITE when read from storage
+    CHATGPT_LITE = "chatgpt_lite"
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
     VERTEX = "vertex"
@@ -108,11 +109,16 @@ class AppSettings:
 
     @property
     def llm_provider(self) -> LlmProvider:
-        raw = str(self._backend.value(_LLM_PROVIDER_KEY, LlmProvider.NONE) or LlmProvider.NONE)
+        raw = str(
+            self._backend.value(_LLM_PROVIDER_KEY, LlmProvider.CHATGPT_LITE)
+            or LlmProvider.CHATGPT_LITE
+        )
+        if raw == LlmProvider.NONE:
+            raw = LlmProvider.CHATGPT_LITE
         try:
             return LlmProvider(raw)
         except ValueError:
-            return LlmProvider.NONE
+            return LlmProvider.CHATGPT_LITE
 
     @llm_provider.setter
     def llm_provider(self, provider: LlmProvider | str) -> None:
