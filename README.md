@@ -43,7 +43,7 @@ Pre-built binaries are published on the [Releases](https://github.com/sthuck/you
 ### Requirements
 
 - **FFmpeg** — required for splitting audio. The app does not bundle FFmpeg.
-  - macOS: `brew install ffmpeg`
+  - macOS: download [FFmpeg 8.1.2 for macOS](https://evermeet.cx/ffmpeg/ffmpeg-8.1.2.zip), or install with `brew install ffmpeg`
   - Linux: install via your package manager (e.g. `sudo apt install ffmpeg`)
   - Windows: download from [ffmpeg.org](https://ffmpeg.org/download.html) or use a package manager
 
@@ -95,6 +95,12 @@ xattr -dr com.apple.quarantine /Applications/YouTubeBootlegger.app
 Then use Option A or B for the first launch.
 
 ### Install FFmpeg
+
+Download the macOS binary: [ffmpeg-8.1.2.zip](https://evermeet.cx/ffmpeg/ffmpeg-8.1.2.zip)
+
+Unzip it, then either move `ffmpeg` to a folder on your PATH (e.g. `/usr/local/bin`) or point to it in the app’s **Settings**.
+
+Alternatively, install via Homebrew:
 
 ```bash
 brew install ffmpeg
