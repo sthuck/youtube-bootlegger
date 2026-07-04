@@ -24,6 +24,7 @@ from ..core.video_info import VideoInfo
 from ..models import DownloadJob
 from ..utils import is_ffmpeg_available, is_valid_youtube_url
 from ..workers import PipelineWorker, TracklistAiWorker, VideoInfoWorker
+from .help_content import build_help_content
 from .models import StatusLogModel, TrackPreviewModel
 
 
@@ -135,6 +136,7 @@ class AppBackend(QObject):
 
     trackPreviewModel = Property(QObject, _getter("_track_model"), constant=True)
     statusLogModel = Property(QObject, _getter("_log_model"), constant=True)
+    helpContent = Property("QVariantMap", _getter("_help_content"), constant=True)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -197,6 +199,7 @@ class AppBackend(QObject):
 
         self._track_model = TrackPreviewModel(self)
         self._log_model = StatusLogModel(self)
+        self._help_content = build_help_content()
         self._refresh_ai_available()
 
     # ── Private helpers ─────────────────────────────────────────────
