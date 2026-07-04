@@ -78,7 +78,7 @@ class SettingsDialog(QDialog):
 
         self._llm_button_group = QButtonGroup(self)
 
-        self._none_radio = QRadioButton("Disabled")
+        self._none_radio = QRadioButton("Lite (ChatGPT)")
         self._openai_radio = QRadioButton("OpenAI")
         self._anthropic_radio = QRadioButton("Anthropic")
         self._vertex_radio = QRadioButton("Google Gemini (API key)")
@@ -97,8 +97,9 @@ class SettingsDialog(QDialog):
             llm_layout.addWidget(radio)
 
         llm_note = QLabel(
-            "Credentials are stored locally. Track list text and video title "
-            "are sent to the selected provider."
+            "Lite opens ChatGPT in your browser with a pre-filled prompt — no API key "
+            "needed. Built-in providers send track list text and video title to the "
+            "selected API using credentials stored locally."
         )
         llm_note.setWordWrap(True)
         llm_note.setStyleSheet("color: gray; font-size: 11px;")
@@ -157,6 +158,10 @@ class SettingsDialog(QDialog):
         llm_layout.addWidget(self._compatible_form_widget)
 
         self._llm_provider_fields = {
+            LlmProvider.CHATGPT_LITE: (
+                self._none_radio,
+                None,
+            ),
             LlmProvider.OPENAI: (
                 self._openai_radio,
                 self._openai_form_widget,
@@ -220,11 +225,12 @@ class SettingsDialog(QDialog):
     def _update_llm_field_visibility(self) -> None:
         active = self._selected_llm_provider()
         for provider, (_radio, form_widget) in self._llm_provider_fields.items():
-            form_widget.setVisible(provider == active)
+            if form_widget is not None:
+                form_widget.setVisible(provider == active)
 
     def _selected_llm_provider(self) -> LlmProvider:
         if self._none_radio.isChecked():
-            return LlmProvider.NONE
+            return LlmProvider.CHATGPT_LITE
         if self._openai_radio.isChecked():
             return LlmProvider.OPENAI
         if self._anthropic_radio.isChecked():
@@ -233,7 +239,7 @@ class SettingsDialog(QDialog):
             return LlmProvider.VERTEX
         if self._compatible_radio.isChecked():
             return LlmProvider.OPENAI_COMPATIBLE
-        return LlmProvider.NONE
+        return LlmProvider.CHATGPT_LITE
 
     def _load_settings(self) -> None:
         """Populate the form from the current persisted settings."""
@@ -254,6 +260,7 @@ class SettingsDialog(QDialog):
 
         provider = self._settings.llm_provider
         radio_map = {
+            LlmProvider.CHATGPT_LITE: self._none_radio,
             LlmProvider.NONE: self._none_radio,
             LlmProvider.OPENAI: self._openai_radio,
             LlmProvider.ANTHROPIC: self._anthropic_radio,

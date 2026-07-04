@@ -40,3 +40,21 @@ def build_extraction_prompt(video_title: str, raw_tracklist: str) -> str:
         "2. artist_name - performer or band name\n"
         "3. album_name - album or release title (often based on the video title)"
     )
+
+
+def build_lite_prompt(video_title: str, raw_tracklist: str) -> str:
+    """Build the prompt opened in ChatGPT for browser-based assist."""
+    return (
+        f"{TEMPLATE_HELP}\n\n"
+        f"Video title: {video_title}\n\n"
+        "Raw track list (one song per line):\n"
+        f"{raw_tracklist.strip()}\n\n"
+        "Analyze the raw track list and video title.\n\n"
+        "Reply with:\n"
+        "1. Template — one line using YouTube Bootlegger placeholders that matches "
+        "every line in the track list. Put this on its own line so I can copy it "
+        "directly into the app's template field.\n"
+        "2. Artist — performer or band name, if you can infer it.\n"
+        "3. Album — album or release title (often based on the video title), if "
+        "you can infer it."
+    )

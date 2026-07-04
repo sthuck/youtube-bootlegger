@@ -15,7 +15,8 @@ from .llm_api import (
     resolve_litellm_model,
     validate_extraction,
 )
-from .prompt import build_extraction_prompt
+from .chatgpt_lite import build_chatgpt_lite_url, launch_chatgpt_lite_assist
+from .prompt import build_extraction_prompt, build_lite_prompt
 
 __all__ = [
     "DEFAULT_ANTHROPIC_MODEL",
@@ -24,8 +25,11 @@ __all__ = [
     "DEFAULT_VERTEX_MODEL",
     "LlmExtractionError",
     "TracklistExtraction",
+    "build_chatgpt_lite_url",
     "build_extraction_prompt",
+    "build_lite_prompt",
     "build_litellm_kwargs",
+    "launch_chatgpt_lite_assist",
     "extract_tracklist_metadata",
     "fallback_template",
     "is_llm_configured",

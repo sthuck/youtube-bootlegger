@@ -1,6 +1,6 @@
 """Unit tests for LLM prompt building."""
 
-from src.youtube_bootlegger.llm.prompt import TEMPLATE_HELP, build_extraction_prompt
+from src.youtube_bootlegger.llm.prompt import TEMPLATE_HELP, build_extraction_prompt, build_lite_prompt
 
 
 class TestBuildExtractionPrompt:
@@ -22,3 +22,10 @@ class TestBuildExtractionPrompt:
         """The LLM must know hh:mm (no seconds) is valid alongside hh:mm:ss."""
         assert "hh:mm" in TEMPLATE_HELP
         assert "%hh%:%mm%:%ss%" in TEMPLATE_HELP
+
+
+class TestBuildLitePrompt:
+    def test_asks_for_copy_paste_friendly_template(self):
+        prompt = build_lite_prompt("Show", "Song - 0:00")
+        assert TEMPLATE_HELP.splitlines()[0] in prompt
+        assert "template field" in prompt.lower()

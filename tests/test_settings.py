@@ -106,9 +106,15 @@ class TestResolvedCommands:
 
 
 class TestLlmSettingsDefaults:
-    def test_llm_provider_defaults_to_none(self):
+    def test_llm_provider_defaults_to_chatgpt_lite(self):
         settings = AppSettings(FakeSettingsBackend())
-        assert settings.llm_provider == LlmProvider.NONE
+        assert settings.llm_provider == LlmProvider.CHATGPT_LITE
+
+    def test_legacy_none_provider_maps_to_chatgpt_lite(self):
+        backend = FakeSettingsBackend()
+        backend.setValue("llm/provider", "none")
+        settings = AppSettings(backend)
+        assert settings.llm_provider == LlmProvider.CHATGPT_LITE
 
     def test_llm_api_fields_default_to_empty(self):
         settings = AppSettings(FakeSettingsBackend())
@@ -159,8 +165,8 @@ class TestLlmSettingsRoundTrip:
         assert settings.compatible_bearer_token == "token"
         assert settings.compatible_model == "local-model"
 
-    def test_invalid_provider_value_falls_back_to_none(self):
+    def test_invalid_provider_value_falls_back_to_chatgpt_lite(self):
         backend = FakeSettingsBackend()
         backend.setValue("llm/provider", "not-a-provider")
         settings = AppSettings(backend)
-        assert settings.llm_provider == LlmProvider.NONE
+        assert settings.llm_provider == LlmProvider.CHATGPT_LITE

@@ -12,8 +12,8 @@ from PySide6.QtWidgets import (
 )
 
 from ..core import parse_tracklist_with_template
-from ..llm import is_llm_configured
-from ..core.settings import get_settings
+from ..llm import is_llm_configured, launch_chatgpt_lite_assist
+from ..core.settings import LlmProvider, get_settings
 from ..models import DownloadJob
 from ..utils import is_ffmpeg_available, is_valid_youtube_url
 from ..workers import PipelineWorker, TracklistAiWorker, VideoInfoWorker
@@ -145,6 +145,26 @@ class MainWindow(QMainWindow):
 
         raw_tracklist = self._tracklist_input.get_text()
         if not raw_tracklist.strip():
+            return
+
+        settings = get_settings()
+        if not is_llm_configured(settings):
+            QMessageBox.warning(
+                self,
+                "AI Assist",
+                "LLM is not configured. Add API credentials in Settings.",
+            )
+            return
+
+        if settings.llm_provider == LlmProvider.CHATGPT_LITE:
+            ok, message = launch_chatgpt_lite_assist(
+                video_info.title,
+                raw_tracklist,
+            )
+            if ok:
+                QMessageBox.information(self, "AI Assist", message)
+            else:
+                QMessageBox.warning(self, "AI Assist", message)
             return
 
         self._ai_analyzing = True

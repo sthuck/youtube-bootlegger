@@ -18,7 +18,7 @@ from ..core import (
     preview_parse,
     validate_template,
 )
-from ..llm import is_llm_configured
+from ..llm import is_llm_configured, launch_chatgpt_lite_assist
 from ..core.settings import LlmProvider, get_settings
 from ..core.video_info import VideoInfo
 from ..models import DownloadJob
@@ -307,7 +307,9 @@ class AppBackend(QObject):
         try:
             parsed = LlmProvider(provider)
         except ValueError:
-            parsed = LlmProvider.NONE
+            parsed = LlmProvider.CHATGPT_LITE
+        if parsed == LlmProvider.NONE:
+            parsed = LlmProvider.CHATGPT_LITE
         self._app_settings.llm_provider = parsed
         self._app_settings.sync()
         self._emit("_llm_provider", parsed.value, self.llmProviderChanged)
@@ -410,6 +412,14 @@ class AppBackend(QObject):
                 "LLM is not configured. Add API credentials in Settings.",
                 True,
             )
+            return
+
+        if self._app_settings.llm_provider == LlmProvider.CHATGPT_LITE:
+            ok, message = launch_chatgpt_lite_assist(
+                self._video_info.title,
+                self._tracklist_text,
+            )
+            self.showMessage.emit("AI Assist", message, not ok)
             return
 
         self._emit("_ai_analyzing", True, self.aiAnalyzingChanged)

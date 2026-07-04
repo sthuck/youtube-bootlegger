@@ -32,6 +32,8 @@ class LlmExtractionError(Exception):
 def is_llm_configured(settings: AppSettings) -> bool:
     """Return True when the active LLM provider has the required credentials."""
     provider = settings.llm_provider
+    if provider == LlmProvider.CHATGPT_LITE:
+        return True
     if provider == LlmProvider.NONE:
         return False
     if provider == LlmProvider.OPENAI:
@@ -172,6 +174,11 @@ def extract_tracklist_metadata(
 
     if not is_llm_configured(settings):
         raise LlmExtractionError("LLM is not configured. Add API credentials in Settings.")
+
+    if settings.llm_provider == LlmProvider.CHATGPT_LITE:
+        raise LlmExtractionError(
+            "Lite (ChatGPT) opens in your browser. Use the AI button instead of the API."
+        )
 
     if completion_fn is None:
         from litellm import completion

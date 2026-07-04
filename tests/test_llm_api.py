@@ -45,9 +45,14 @@ def make_settings(**kwargs) -> AppSettings:
 
 
 class TestIsLlmConfigured:
-    def test_none_provider_is_not_configured(self):
+    def test_legacy_none_storage_is_treated_as_chatgpt_lite(self):
         settings = make_settings(llm_provider=LlmProvider.NONE, openai_api_key="sk-test")
-        assert is_llm_configured(settings) is False
+        assert settings.llm_provider == LlmProvider.CHATGPT_LITE
+        assert is_llm_configured(settings) is True
+
+    def test_chatgpt_lite_is_configured_without_credentials(self):
+        settings = make_settings(llm_provider=LlmProvider.CHATGPT_LITE)
+        assert is_llm_configured(settings) is True
 
     def test_openai_requires_api_key(self):
         settings = make_settings(llm_provider=LlmProvider.OPENAI, openai_api_key="")
@@ -192,9 +197,17 @@ class TestValidateExtraction:
 
 
 class TestExtractTracklistMetadata:
-    def test_requires_configured_provider(self):
-        settings = make_settings(llm_provider=LlmProvider.NONE)
+    def test_requires_configured_api_provider(self):
+        settings = make_settings(
+            llm_provider=LlmProvider.OPENAI,
+            openai_api_key="",
+        )
         with pytest.raises(LlmExtractionError, match="not configured"):
+            extract_tracklist_metadata(settings, "Show Title", "Song - 0:00")
+
+    def test_rejects_chatgpt_lite_provider(self):
+        settings = make_settings(llm_provider=LlmProvider.CHATGPT_LITE)
+        with pytest.raises(LlmExtractionError, match="browser"):
             extract_tracklist_metadata(settings, "Show Title", "Song - 0:00")
 
     def test_requires_tracklist(self):
