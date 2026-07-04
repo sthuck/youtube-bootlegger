@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">YouTube Bootlegger logo</title>
+  <desc id="desc">Minimalist black rounded square with a red sword-wielding warrior silhouette and white border accents.</desc>
+
+  <rect x="32" y="32" width="960" height="960" rx="212" fill="#0a0a0a"/>
+
+  <rect x="68" y="68" width="888" height="888" rx="188" fill="none" stroke="#ffffff" stroke-width="12"/>
+  <rect x="92" y="92" width="840" height="840" rx="172" fill="none" stroke="#e62e3e" stroke-width="5" opacity="0.75"/>
+
+  <!-- sword blade -->
+  <path d="M 352 712 L 748 268" stroke="#e62e3e" stroke-width="30" stroke-linecap="round"/>
+  <path d="M 358 706 L 742 274" stroke="#ffffff" stroke-width="6" stroke-linecap="round" opacity="0.35"/>
+
+  <!-- guard and hilt -->
+  <path d="M 330 690 C 300 730, 360 770, 395 735 C 420 710, 405 665, 365 655 C 340 648, 318 662, 330 690 Z" fill="#e62e3e"/>
+  <path d="M 372 648 L 408 612" stroke="#e62e3e" stroke-width="22" stroke-linecap="round"/>
+  <ellipse cx="412" cy="606" rx="18" ry="14" fill="#e62e3e"/>
+
+  <!-- head and shoulder -->
+  <path d="M 408 620 Q 428 560, 442 492" stroke="#e62e3e" stroke-width="36" stroke-linecap="round" fill="none"/>
+  <path d="M 436 478 C 418 452, 448 420, 472 438 C 492 452, 478 488, 448 492 C 432 494, 424 486, 436 478 Z" fill="#e62e3e"/>
+
+  <!-- trailing cloak stroke -->
+  <path d="M 360 680 Q 280 760, 240 820" stroke="#e62e3e" stroke-width="24" stroke-linecap="round" fill="none" opacity="0.85"/>
+</svg>

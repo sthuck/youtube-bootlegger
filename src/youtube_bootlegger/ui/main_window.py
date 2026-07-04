@@ -1,7 +1,7 @@
 """Main application window."""
 
 from PySide6.QtCore import QThreadPool, QTimer
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QMainWindow,
@@ -16,6 +16,7 @@ from ..llm import is_llm_configured
 from ..core.settings import get_settings
 from ..models import DownloadJob
 from ..utils import is_ffmpeg_available, is_valid_youtube_url
+from ..resources import APP_LOGO_PNG
 from ..workers import PipelineWorker, TracklistAiWorker, VideoInfoWorker
 from .widgets import (
     DirectoryPickerWidget,
@@ -52,6 +53,7 @@ class MainWindow(QMainWindow):
     def _setup_ui(self) -> None:
         """Initialize and layout all UI components."""
         self.setWindowTitle("YouTube Bootlegger")
+        self.setWindowIcon(QIcon(str(APP_LOGO_PNG)))
         self.setMinimumSize(1000, 700)
 
         central_widget = QWidget()
