@@ -1,13 +1,26 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
   <title id="title">YouTube Bootlegger logo</title>
-  <desc id="desc">Minimalist black rounded square with a white beamed music note and red note heads.</desc>
+  <desc id="desc">Minimalist black rounded square with a white rock star silhouette raising a fist and playing a red guitar.</desc>
 
   <rect x="32" y="32" width="960" height="960" rx="212" fill="#0b0b0d"/>
   <rect x="70" y="70" width="884" height="884" rx="186" fill="none" stroke="#e62e3e" stroke-width="10" opacity="0.85"/>
 
-  <path d="M432 330L708 296" stroke="#f5f5f7" stroke-width="86" stroke-linecap="round"/>
-  <path d="M432 342V688" stroke="#f5f5f7" stroke-width="26" stroke-linecap="round"/>
-  <path d="M708 308V648" stroke="#f5f5f7" stroke-width="26" stroke-linecap="round"/>
-  <ellipse cx="368" cy="702" rx="78" ry="56" transform="rotate(-20 368 702)" fill="#e62e3e"/>
-  <ellipse cx="650" cy="660" rx="78" ry="56" transform="rotate(-20 650 660)" fill="#e62e3e"/>
+  <!-- figure -->
+  <circle cx="447" cy="238" r="56" fill="#f5f5f7"/>
+  <path d="M452 328L465 580" stroke="#f5f5f7" stroke-width="96" stroke-linecap="round"/>
+  <path d="M420 375L327 318L297 215" stroke="#f5f5f7" stroke-width="38" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <circle cx="293" cy="200" r="34" fill="#f5f5f7"/>
+  <path d="M463 570L350 812" stroke="#f5f5f7" stroke-width="48" stroke-linecap="round"/>
+  <path d="M468 570L585 806" stroke="#f5f5f7" stroke-width="48" stroke-linecap="round"/>
+
+  <!-- guitar -->
+  <path d="M535 590L775 350" stroke="#e62e3e" stroke-width="24" stroke-linecap="round"/>
+  <path d="M771 346L801 316" stroke="#e62e3e" stroke-width="46" stroke-linecap="round"/>
+  <ellipse cx="545" cy="610" rx="100" ry="74" transform="rotate(-42 545 610)" fill="#e62e3e"/>
+  <ellipse cx="607" cy="540" rx="62" ry="47" transform="rotate(-42 607 540)" fill="#e62e3e"/>
+  <circle cx="575" cy="585" r="26" fill="#0b0b0d"/>
+
+  <!-- fretting arm over guitar -->
+  <path d="M480 385L675 450" stroke="#f5f5f7" stroke-width="38" stroke-linecap="round"/>
+  <circle cx="679" cy="448" r="26" fill="#f5f5f7"/>
 </svg>
