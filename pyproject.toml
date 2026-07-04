@@ -26,6 +26,9 @@ dev = [
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+youtube_bootlegger = ["assets/*.png", "assets/*.svg", "qml/*.qml"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]

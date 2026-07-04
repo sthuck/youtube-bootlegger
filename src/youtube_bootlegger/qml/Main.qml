@@ -49,8 +49,18 @@ ApplicationWindow {
         RowLayout {
             anchors.fill: parent
             anchors.leftMargin: 24; anchors.rightMargin: 24
+            spacing: 10
+            Image {
+                source: logoUrl
+                sourceSize.width: 64
+                sourceSize.height: 64
+                Layout.preferredWidth: 28
+                Layout.preferredHeight: 28
+                fillMode: Image.PreserveAspectFit
+                smooth: true
+            }
             Text {
-                text: "⚡ YouTube Bootlegger"
+                text: "YouTube Bootlegger"
                 color: _c.text
                 font { pixelSize: 18; weight: Font.Bold; family: "Segoe UI, Helvetica, Arial, sans-serif" }
             }
