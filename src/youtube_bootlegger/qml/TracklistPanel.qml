@@ -126,7 +126,28 @@ Rectangle {
                         placeholderText: "Enter one track per line matching your template.\n\nExample (with default template):\nOpening Number - 0:00\nSecond Song - 4:32\nThird Song - 8:15\nFinal Song - 12:47"
                         placeholderTextColor: root.colors.textMuted
 
+                        background: Rectangle { color: "transparent" }
+
                         onTextChanged: backend.setTracklistText(text)
+                    }
+
+                    // TextArea swallows wheel events; forward them to the Flickable
+                    MouseArea {
+                        anchors.fill: parent
+                        acceptedButtons: Qt.NoButton
+                        propagateComposedEvents: true
+                        onWheel: function(wheel) {
+                            var step = 40
+                            if (wheel.angleDelta.y < 0) {
+                                if (!trackFlickable.atYEnd)
+                                    trackFlickable.contentY = Math.min(
+                                        trackFlickable.contentHeight - trackFlickable.height,
+                                        trackFlickable.contentY + step)
+                            } else if (!trackFlickable.atYBeginning) {
+                                trackFlickable.contentY = Math.max(0, trackFlickable.contentY - step)
+                            }
+                            wheel.accepted = true
+                        }
                     }
                 }
             }
