@@ -88,32 +88,27 @@ Rectangle {
             Layout.fillHeight: true
             spacing: 12
 
-            /* tracklist text area – bounded container so content scrolls instead of expanding */
-            Item {
+            /* tracklist text area – ScrollView keeps height bounded while content scrolls */
+            ScrollView {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 Layout.minimumWidth: 120
                 Layout.minimumHeight: 80
                 clip: true
+                ScrollBar.vertical.policy: ScrollBar.AsNeeded
 
                 TextArea {
                     id: trackArea
-                    anchors.fill: parent
-
+                    width: parent.width
                     color: root.colors.text
                     font.pixelSize: 13
                     wrapMode: TextEdit.Wrap
                     selectByMouse: true
                     selectionColor: root.colors.accent
                     padding: 10
-                    clip: true
 
                     placeholderText: "Enter one track per line matching your template.\n\nExample (with default template):\nOpening Number - 0:00\nSecond Song - 4:32\nThird Song - 8:15\nFinal Song - 12:47"
                     placeholderTextColor: root.colors.textMuted
-
-                    ScrollBar.vertical: ScrollBar {
-                        policy: ScrollBar.AsNeeded
-                    }
 
                     background: Rectangle {
                         color: root.colors.inputBg
