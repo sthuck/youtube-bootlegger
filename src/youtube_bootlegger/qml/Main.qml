@@ -89,6 +89,34 @@ ApplicationWindow {
                 color: _c.textMuted
                 font.pixelSize: 12
             }
+            Rectangle {
+                width: 32; height: 32; radius: 8
+                color: helpBtnMA.containsMouse ? _c.elevated : "transparent"
+                Behavior on color { ColorAnimation { duration: 120 } }
+                Text { anchors.centerIn: parent; text: "?"; color: _c.textSec; font { pixelSize: 16; weight: Font.Bold } }
+                MouseArea {
+                    id: helpBtnMA
+                    anchors.fill: parent
+                    hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                    onClicked: helpPanel.open = true
+                }
+                ToolTip.text: "Help (F1)"
+                ToolTip.visible: helpBtnMA.containsMouse
+            }
+            Rectangle {
+                width: 32; height: 32; radius: 8
+                color: settingsBtnMA.containsMouse ? _c.elevated : "transparent"
+                Behavior on color { ColorAnimation { duration: 120 } }
+                Text { anchors.centerIn: parent; text: "⚙"; color: _c.textSec; font.pixelSize: 16 }
+                MouseArea {
+                    id: settingsBtnMA
+                    anchors.fill: parent
+                    hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                    onClicked: settingsPanel.open = true
+                }
+                ToolTip.text: "Settings"
+                ToolTip.visible: settingsBtnMA.containsMouse
+            }
         }
 
         Rectangle {

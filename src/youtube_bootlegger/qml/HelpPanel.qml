@@ -23,7 +23,9 @@ Item {
         id: card
         anchors.centerIn: parent
         width: Math.min(parent.width - 48, 580)
-        height: Math.min(parent.height - 48, contentScroll.contentHeight + 48)
+        readonly property real paddedContentHeight: content.implicitHeight + 48
+        readonly property real maxHeight: parent.height - 48
+        height: Math.min(maxHeight, paddedContentHeight)
         color: root.colors.card
         radius: 14
         border.color: root.colors.border; border.width: 1
@@ -34,7 +36,8 @@ Item {
             id: contentScroll
             anchors { fill: parent; margins: 24 }
             clip: true
-            ScrollBar.vertical.policy: ScrollBar.AsNeeded
+            ScrollBar.vertical.policy: card.paddedContentHeight > card.height ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
+            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
             ColumnLayout {
                 id: content
