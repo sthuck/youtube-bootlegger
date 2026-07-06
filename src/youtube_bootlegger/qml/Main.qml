@@ -5,13 +5,32 @@ import QtQuick.Dialogs
 
 ApplicationWindow {
     id: root
-    width: 1120
-    height: 780
-    minimumWidth: 920
-    minimumHeight: 660
+    width: 1280
+    height: 880
+    minimumWidth: 1040
+    minimumHeight: 720
     title: "YouTube Bootlegger"
     visible: true
     color: _c.bg
+
+    menuBar: MenuBar {
+        Menu {
+            title: qsTr("&File")
+            Action {
+                text: qsTr("&Settings…")
+                onTriggered: settingsPanel.open = true
+            }
+        }
+
+        Menu {
+            title: qsTr("&Help")
+            Action {
+                text: qsTr("&YouTube Bootlegger Help")
+                shortcut: "F1"
+                onTriggered: helpPanel.open = true
+            }
+        }
+    }
 
     /* ── colour tokens ─────────────────────────────────────── */
     QtObject {
@@ -69,34 +88,6 @@ ApplicationWindow {
                 text: "QML Edition"
                 color: _c.textMuted
                 font.pixelSize: 12
-            }
-            Rectangle {
-                width: 32; height: 32; radius: 8
-                color: helpBtnMA.containsMouse ? _c.elevated : "transparent"
-                Behavior on color { ColorAnimation { duration: 120 } }
-                Text { anchors.centerIn: parent; text: "?"; color: _c.textSec; font { pixelSize: 16; weight: Font.Bold } }
-                MouseArea {
-                    id: helpBtnMA
-                    anchors.fill: parent
-                    hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                    onClicked: helpPanel.open = true
-                }
-                ToolTip.text: "Help (F1)"
-                ToolTip.visible: helpBtnMA.containsMouse
-            }
-            Rectangle {
-                width: 32; height: 32; radius: 8
-                color: settingsBtnMA.containsMouse ? _c.elevated : "transparent"
-                Behavior on color { ColorAnimation { duration: 120 } }
-                Text { anchors.centerIn: parent; text: "⚙"; color: _c.textSec; font.pixelSize: 16 }
-                MouseArea {
-                    id: settingsBtnMA
-                    anchors.fill: parent
-                    hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                    onClicked: settingsPanel.open = true
-                }
-                ToolTip.text: "Settings"
-                ToolTip.visible: settingsBtnMA.containsMouse
             }
         }
 

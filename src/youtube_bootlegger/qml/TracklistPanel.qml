@@ -93,6 +93,7 @@ Rectangle {
                 id: trackArea
                 Layout.fillWidth: true
                 Layout.fillHeight: true
+                Layout.preferredWidth: 1
                 Layout.minimumWidth: 120
 
                 color: root.colors.text
@@ -118,9 +119,10 @@ Rectangle {
 
             /* preview panel */
             ColumnLayout {
+                Layout.fillWidth: true
                 Layout.fillHeight: true
-                Layout.preferredWidth: 220
-                Layout.minimumWidth: 160
+                Layout.preferredWidth: 1
+                Layout.minimumWidth: 120
                 spacing: 6
 
                 RowLayout {
