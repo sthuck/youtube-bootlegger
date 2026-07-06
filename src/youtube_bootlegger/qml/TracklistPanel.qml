@@ -88,7 +88,7 @@ Rectangle {
             Layout.fillHeight: true
             spacing: 12
 
-            /* tracklist text area – bordered container with ScrollView for wheel scrolling */
+            /* tracklist text area – Flickable + TextArea.flickable for reliable wheel scrolling */
             Rectangle {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
@@ -101,15 +101,20 @@ Rectangle {
                 clip: true
                 Behavior on border.color { ColorAnimation { duration: 150 } }
 
-                ScrollView {
-                    id: trackScroll
+                Flickable {
+                    id: trackFlickable
                     anchors.fill: parent
                     anchors.margins: 1
                     clip: true
-                    ScrollBar.vertical.policy: ScrollBar.AsNeeded
-                    ScrollBar.vertical.interactive: true
+                    boundsBehavior: Flickable.StopAtBounds
+                    flickableDirection: Flickable.VerticalFlick
 
-                    TextArea {
+                    ScrollBar.vertical: ScrollBar {
+                        policy: ScrollBar.AsNeeded
+                        interactive: true
+                    }
+
+                    TextArea.flickable: TextArea {
                         id: trackArea
                         color: root.colors.text
                         font.pixelSize: 13
