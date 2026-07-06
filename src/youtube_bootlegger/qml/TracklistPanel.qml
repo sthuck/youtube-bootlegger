@@ -88,32 +88,43 @@ Rectangle {
             Layout.fillHeight: true
             spacing: 12
 
-            /* tracklist text area – TextArea used directly for reliable focus */
-            TextArea {
-                id: trackArea
+            /* tracklist text area – bounded container so content scrolls instead of expanding */
+            Item {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 Layout.minimumWidth: 120
+                Layout.minimumHeight: 80
+                clip: true
 
-                color: root.colors.text
-                font.pixelSize: 13
-                wrapMode: TextEdit.Wrap
-                selectByMouse: true
-                selectionColor: root.colors.accent
-                padding: 10
+                TextArea {
+                    id: trackArea
+                    anchors.fill: parent
 
-                placeholderText: "Enter one track per line matching your template.\n\nExample (with default template):\nOpening Number - 0:00\nSecond Song - 4:32\nThird Song - 8:15\nFinal Song - 12:47"
-                placeholderTextColor: root.colors.textMuted
+                    color: root.colors.text
+                    font.pixelSize: 13
+                    wrapMode: TextEdit.Wrap
+                    selectByMouse: true
+                    selectionColor: root.colors.accent
+                    padding: 10
+                    clip: true
 
-                background: Rectangle {
-                    color: root.colors.inputBg
-                    radius: root.colors.radiusSm
-                    border.color: trackArea.activeFocus ? root.colors.borderFocus : root.colors.border
-                    border.width: trackArea.activeFocus ? 2 : 1
-                    Behavior on border.color { ColorAnimation { duration: 150 } }
+                    placeholderText: "Enter one track per line matching your template.\n\nExample (with default template):\nOpening Number - 0:00\nSecond Song - 4:32\nThird Song - 8:15\nFinal Song - 12:47"
+                    placeholderTextColor: root.colors.textMuted
+
+                    ScrollBar.vertical: ScrollBar {
+                        policy: ScrollBar.AsNeeded
+                    }
+
+                    background: Rectangle {
+                        color: root.colors.inputBg
+                        radius: root.colors.radiusSm
+                        border.color: trackArea.activeFocus ? root.colors.borderFocus : root.colors.border
+                        border.width: trackArea.activeFocus ? 2 : 1
+                        Behavior on border.color { ColorAnimation { duration: 150 } }
+                    }
+
+                    onTextChanged: backend.setTracklistText(text)
                 }
-
-                onTextChanged: backend.setTracklistText(text)
             }
 
             /* preview panel */
@@ -147,7 +158,11 @@ Rectangle {
                         anchors { fill: parent; margins: 6 }
                         model: backend.trackPreviewModel
                         spacing: 3
+                        clip: true
                         boundsBehavior: Flickable.StopAtBounds
+                        ScrollBar.vertical: ScrollBar {
+                            policy: ScrollBar.AsNeeded
+                        }
 
                         delegate: Rectangle {
                             required property int trackIndex
@@ -186,7 +201,12 @@ Rectangle {
 
                             ToolTip.text: trackError
                             ToolTip.visible: trackError !== "" && trackMA.containsMouse
-                            MouseArea { id: trackMA; anchors.fill: parent; hoverEnabled: true }
+                            MouseArea {
+                                id: trackMA
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                acceptedButtons: Qt.NoButton
+                            }
                         }
 
                         Text {
