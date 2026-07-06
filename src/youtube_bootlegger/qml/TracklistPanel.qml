@@ -88,37 +88,41 @@ Rectangle {
             Layout.fillHeight: true
             spacing: 12
 
-            /* tracklist text area – ScrollView keeps height bounded while content scrolls */
-            ScrollView {
+            /* tracklist text area – bordered container with ScrollView for wheel scrolling */
+            Rectangle {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 Layout.minimumWidth: 120
                 Layout.minimumHeight: 80
+                color: root.colors.inputBg
+                radius: root.colors.radiusSm
+                border.color: trackArea.activeFocus ? root.colors.borderFocus : root.colors.border
+                border.width: trackArea.activeFocus ? 2 : 1
                 clip: true
-                ScrollBar.vertical.policy: ScrollBar.AsNeeded
+                Behavior on border.color { ColorAnimation { duration: 150 } }
 
-                TextArea {
-                    id: trackArea
-                    width: parent.width
-                    color: root.colors.text
-                    font.pixelSize: 13
-                    wrapMode: TextEdit.Wrap
-                    selectByMouse: true
-                    selectionColor: root.colors.accent
-                    padding: 10
+                ScrollView {
+                    id: trackScroll
+                    anchors.fill: parent
+                    anchors.margins: 1
+                    clip: true
+                    ScrollBar.vertical.policy: ScrollBar.AsNeeded
+                    ScrollBar.vertical.interactive: true
 
-                    placeholderText: "Enter one track per line matching your template.\n\nExample (with default template):\nOpening Number - 0:00\nSecond Song - 4:32\nThird Song - 8:15\nFinal Song - 12:47"
-                    placeholderTextColor: root.colors.textMuted
+                    TextArea {
+                        id: trackArea
+                        color: root.colors.text
+                        font.pixelSize: 13
+                        wrapMode: TextEdit.Wrap
+                        selectByMouse: true
+                        selectionColor: root.colors.accent
+                        padding: 10
 
-                    background: Rectangle {
-                        color: root.colors.inputBg
-                        radius: root.colors.radiusSm
-                        border.color: trackArea.activeFocus ? root.colors.borderFocus : root.colors.border
-                        border.width: trackArea.activeFocus ? 2 : 1
-                        Behavior on border.color { ColorAnimation { duration: 150 } }
+                        placeholderText: "Enter one track per line matching your template.\n\nExample (with default template):\nOpening Number - 0:00\nSecond Song - 4:32\nThird Song - 8:15\nFinal Song - 12:47"
+                        placeholderTextColor: root.colors.textMuted
+
+                        onTextChanged: backend.setTracklistText(text)
                     }
-
-                    onTextChanged: backend.setTracklistText(text)
                 }
             }
 
@@ -157,6 +161,7 @@ Rectangle {
                         boundsBehavior: Flickable.StopAtBounds
                         ScrollBar.vertical: ScrollBar {
                             policy: ScrollBar.AsNeeded
+                            interactive: true
                         }
 
                         delegate: Rectangle {
