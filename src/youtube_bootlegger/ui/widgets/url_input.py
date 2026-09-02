@@ -3,8 +3,6 @@
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QLabel, QLineEdit, QVBoxLayout, QWidget
 
-from ...utils import is_valid_youtube_url
-
 
 class UrlInputWidget(QWidget):
     """Widget for YouTube URL input with validation."""
@@ -38,21 +36,11 @@ class UrlInputWidget(QWidget):
         """Return the entered URL."""
         return self._input.text().strip()
 
-    def validate(self) -> tuple[bool, str]:
-        """Validate URL format.
-
-        Returns:
-            Tuple of (is_valid, error_message).
-        """
-        url = self.get_url()
-        if not url:
-            return False, "Please enter a YouTube URL"
-        if not is_valid_youtube_url(url):
-            return False, "Please enter a valid YouTube URL"
-        return True, ""
-
     def set_error(self, message: str) -> None:
-        """Display validation error."""
+        """Display a validation error, or clear it when message is empty."""
+        if not message:
+            self.clear_error()
+            return
         self._error_label.setText(message)
         self._error_label.show()
         self._input.setStyleSheet("border: 1px solid red;")

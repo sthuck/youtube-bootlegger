@@ -15,13 +15,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ...core import (
-    DEFAULT_TEMPLATE,
-    ParseError,
-    parse_tracklist_with_template,
-    preview_parse,
-    validate_template,
-)
+from ...core import DEFAULT_TEMPLATE
 from ..theme import ThemeColors
 
 
@@ -37,7 +31,7 @@ Third Song - 8:15
 Final Song - 12:47"""
 
     template_changed = Signal(str)
-    tracklist_changed = Signal()
+    tracklist_changed = Signal(str)
     ai_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None):
@@ -47,7 +41,7 @@ Final Song - 12:47"""
         self._ai_loading = False
         self._setup_ui()
         self._connect_signals()
-        self._update_preview()
+        self._show_empty_preview()
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -188,21 +182,21 @@ Final Song - 12:47"""
         self._input.textChanged.connect(self._on_tracklist_changed)
 
     def _on_template_changed(self, text: str) -> None:
-        validation = validate_template(text)
-        if validation.is_valid:
-            self._template_error.hide()
-            self._template_input.setStyleSheet("")
-        else:
-            self._template_error.setText(validation.error or "Invalid template")
-            self._template_error.show()
-            self._template_input.setStyleSheet("border: 1px solid orange;")
-
-        self._update_preview()
         self.template_changed.emit(text)
 
     def _on_tracklist_changed(self) -> None:
-        self._update_preview()
-        self.tracklist_changed.emit()
+        self.clear_error()
+        self.tracklist_changed.emit(self._input.toPlainText())
+
+    def set_template_error(self, message: str) -> None:
+        """Display a template validation error, or clear it when empty."""
+        if message:
+            self._template_error.setText(message)
+            self._template_error.show()
+            self._template_input.setStyleSheet("border: 1px solid orange;")
+        else:
+            self._template_error.hide()
+            self._template_input.setStyleSheet("")
 
     def set_ai_available(self, available: bool) -> None:
         """Enable or disable the AI assist button when not loading."""
@@ -221,10 +215,10 @@ Final Song - 12:47"""
 
     def set_template(self, template: str) -> None:
         """Set the template text programmatically."""
-        self._template_input.setText(template)
-        self._on_template_changed(template)
+        if self._template_input.text() != template:
+            self._template_input.setText(template)
 
-    def _update_preview(self) -> None:
+    def _clear_preview_widgets(self) -> None:
         while self._preview_layout.count() > 1:
             item = self._preview_layout.takeAt(0)
             if item:
@@ -232,19 +226,26 @@ Final Song - 12:47"""
                 if widget:
                     widget.deleteLater()
 
-        template = self._template_input.text() or DEFAULT_TEMPLATE
-        text = self._input.toPlainText()
+    def _show_empty_preview(self) -> None:
+        self._clear_preview_widgets()
+        self._status_label.setText("")
+        self._status_label.setStyleSheet("font-size: 11px;")
+        placeholder = QLabel("Enter tracks to see preview")
+        placeholder.setStyleSheet(
+            f"color: {self._theme.text_muted}; font-style: italic;"
+        )
+        self._preview_layout.insertWidget(0, placeholder)
 
-        preview = preview_parse(text, template)
+    def set_preview(self, preview) -> None:
+        """Render a parse preview produced by the controller.
+
+        Args:
+            preview: ParsePreview describing the current tracklist.
+        """
+        self._clear_preview_widgets()
 
         if preview.total_lines == 0:
-            self._status_label.setText("")
-            self._status_label.setStyleSheet("font-size: 11px;")
-            placeholder = QLabel("Enter tracks to see preview")
-            placeholder.setStyleSheet(
-                f"color: {self._theme.text_muted}; font-style: italic;"
-            )
-            self._preview_layout.insertWidget(0, placeholder)
+            self._show_empty_preview()
             return
 
         if preview.is_valid:
@@ -311,31 +312,11 @@ Final Song - 12:47"""
         """Return the current template."""
         return self._template_input.text() or DEFAULT_TEMPLATE
 
-    def validate(self) -> tuple[bool, str]:
-        """Validate template and tracklist.
-
-        Returns:
-            Tuple of (is_valid, error_message).
-        """
-        template = self.get_template()
-        template_validation = validate_template(template)
-        if not template_validation.is_valid:
-            return False, f"Invalid template: {template_validation.error}"
-
-        text = self.get_text()
-        if not text.strip():
-            return False, "Please enter at least one track"
-
-        try:
-            tracks = parse_tracklist_with_template(text, template)
-            if not tracks:
-                return False, "No valid tracks found"
-            return True, ""
-        except ParseError as e:
-            return False, str(e)
-
     def set_error(self, message: str) -> None:
-        """Display validation error."""
+        """Display a validation error, or clear it when message is empty."""
+        if not message:
+            self.clear_error()
+            return
         self._error_label.setText(message)
         self._error_label.show()
         self._input.setStyleSheet("border: 1px solid red;")

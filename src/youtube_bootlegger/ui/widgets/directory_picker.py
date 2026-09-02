@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
@@ -16,9 +17,16 @@ from PySide6.QtWidgets import (
 class DirectoryPickerWidget(QWidget):
     """Widget for selecting output directory."""
 
+    directory_changed = Signal(str)
+
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self._setup_ui()
+        self._input.textChanged.connect(self._on_text_changed)
+
+    def _on_text_changed(self, text: str) -> None:
+        self.clear_error()
+        self.directory_changed.emit(text.strip())
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -49,32 +57,11 @@ class DirectoryPickerWidget(QWidget):
         """Return selected directory path."""
         return Path(self._input.text().strip())
 
-    def validate(self) -> tuple[bool, str]:
-        """Validate directory exists and is writable.
-
-        Returns:
-            Tuple of (is_valid, error_message).
-        """
-        path = self.get_directory()
-        if not self._input.text().strip():
-            return False, "Please select an output directory"
-
-        if path.exists() and not path.is_dir():
-            return False, "Selected path is not a directory"
-
-        parent = path if path.exists() else path.parent
-        while not parent.exists():
-            parent = parent.parent
-
-        try:
-            if not parent.exists():
-                return False, "Parent directory does not exist"
-            return True, ""
-        except PermissionError:
-            return False, "Cannot write to selected directory"
-
     def set_error(self, message: str) -> None:
-        """Display validation error."""
+        """Display a validation error, or clear it when message is empty."""
+        if not message:
+            self.clear_error()
+            return
         self._error_label.setText(message)
         self._error_label.show()
         self._input.setStyleSheet("border: 1px solid red;")

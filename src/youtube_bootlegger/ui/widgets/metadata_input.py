@@ -1,7 +1,7 @@
 """Metadata input widget for artist and album information."""
 
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
-    QHBoxLayout,
     QLabel,
     QLineEdit,
     QVBoxLayout,
@@ -14,12 +14,23 @@ from ..theme import ThemeColors
 class MetadataInputWidget(QWidget):
     """Widget for entering artist and album metadata."""
 
+    artist_changed = Signal(str)
+    album_changed = Signal(str)
+
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self._theme = ThemeColors()
         self._setup_ui()
-        self._artist_input.textChanged.connect(self.clear_error)
-        self._album_input.textChanged.connect(self.clear_error)
+        self._artist_input.textChanged.connect(self._on_artist_changed)
+        self._album_input.textChanged.connect(self._on_album_changed)
+
+    def _on_artist_changed(self, text: str) -> None:
+        self.clear_error()
+        self.artist_changed.emit(text)
+
+    def _on_album_changed(self, text: str) -> None:
+        self.clear_error()
+        self.album_changed.emit(text)
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -61,18 +72,11 @@ class MetadataInputWidget(QWidget):
         """Return the album name."""
         return self._album_input.text().strip()
 
-    def validate(self) -> tuple[bool, str]:
-        """Validate that at least one of artist/album is filled in.
-
-        Returns:
-            Tuple of (is_valid, error_message).
-        """
-        if not self.get_artist() and not self.get_album():
-            return False, "Please enter an artist name or album name"
-        return True, ""
-
     def set_error(self, message: str) -> None:
-        """Display validation error."""
+        """Display a validation error, or clear it when message is empty."""
+        if not message:
+            self.clear_error()
+            return
         self._error_label.setText(message)
         self._error_label.show()
         self._artist_input.setStyleSheet("border: 1px solid red;")

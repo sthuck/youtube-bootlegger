@@ -18,21 +18,26 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ...controller import SETTING_FIELDS, AppController
 from ...llm import (
     DEFAULT_ANTHROPIC_MODEL,
     DEFAULT_COMPATIBLE_MODEL,
     DEFAULT_OPENAI_MODEL,
     DEFAULT_VERTEX_MODEL,
 )
-from ...core.settings import AppSettings, LlmProvider, get_settings
+from ...core.settings import LlmProvider
 
 
 class SettingsDialog(QDialog):
-    """Modal dialog for editing persisted application settings."""
+    """Modal dialog for editing persisted application settings.
 
-    def __init__(self, parent: QWidget | None = None, settings: AppSettings | None = None):
+    Values are read and written through the shared :class:`AppController`, so
+    saving here refreshes ffmpeg/LLM availability for every front-end.
+    """
+
+    def __init__(self, controller: AppController, parent: QWidget | None = None):
         super().__init__(parent)
-        self._settings = settings or get_settings()
+        self._controller = controller
         self.setWindowTitle("Settings")
         self.setMinimumWidth(520)
         self.setMinimumHeight(560)
@@ -106,24 +111,20 @@ class SettingsDialog(QDialog):
         llm_layout.addWidget(llm_note)
 
         self._openai_api_key = QLineEdit()
-        self._openai_api_key.setEchoMode(QLineEdit.EchoMode.Password)
         self._openai_model = QLineEdit()
         self._openai_model.setPlaceholderText(DEFAULT_OPENAI_MODEL)
 
         self._anthropic_api_key = QLineEdit()
-        self._anthropic_api_key.setEchoMode(QLineEdit.EchoMode.Password)
         self._anthropic_model = QLineEdit()
         self._anthropic_model.setPlaceholderText(DEFAULT_ANTHROPIC_MODEL)
 
         self._vertex_api_key = QLineEdit()
-        self._vertex_api_key.setEchoMode(QLineEdit.EchoMode.Password)
         self._vertex_model = QLineEdit()
         self._vertex_model.setPlaceholderText(DEFAULT_VERTEX_MODEL)
 
         self._compatible_base_url = QLineEdit()
         self._compatible_base_url.setPlaceholderText("https://api.example.com/v1")
         self._compatible_bearer_token = QLineEdit()
-        self._compatible_bearer_token.setEchoMode(QLineEdit.EchoMode.Password)
         self._compatible_bearer_token.setPlaceholderText("Optional")
         self._compatible_model = QLineEdit()
         self._compatible_model.setPlaceholderText(DEFAULT_COMPATIBLE_MODEL)
@@ -184,6 +185,29 @@ class SettingsDialog(QDialog):
         self._update_llm_field_visibility()
         layout.addWidget(llm_group)
 
+        # Maps each AppSettings attribute to the widget that edits it, so
+        # loading and saving stay loops rather than one line per setting.
+        # llm_provider is driven by the radio group instead of a single widget.
+        self._field_widgets = {
+            "use_external_ytdlp": self._use_external_checkbox,
+            "ytdlp_path": self._ytdlp_path_input,
+            "ffmpeg_path": self._ffmpeg_path_input,
+            "openai_api_key": self._openai_api_key,
+            "openai_model": self._openai_model,
+            "anthropic_api_key": self._anthropic_api_key,
+            "anthropic_model": self._anthropic_model,
+            "vertex_api_key": self._vertex_api_key,
+            "vertex_model": self._vertex_model,
+            "compatible_base_url": self._compatible_base_url,
+            "compatible_bearer_token": self._compatible_bearer_token,
+            "compatible_model": self._compatible_model,
+        }
+
+        for field in SETTING_FIELDS:
+            widget = self._field_widgets.get(field.name)
+            if field.secret and isinstance(widget, QLineEdit):
+                widget.setEchoMode(QLineEdit.EchoMode.Password)
+
         scroll.setWidget(content)
 
         buttons = QDialogButtonBox(
@@ -241,24 +265,31 @@ class SettingsDialog(QDialog):
             return LlmProvider.OPENAI_COMPATIBLE
         return LlmProvider.CHATGPT_LITE
 
+    @staticmethod
+    def _read_widget(widget: QWidget):
+        """Return the current value held by a settings widget."""
+        if isinstance(widget, QCheckBox):
+            return widget.isChecked()
+        return widget.text()
+
+    @staticmethod
+    def _write_widget(widget: QWidget, value) -> None:
+        """Populate a settings widget from a stored value."""
+        if isinstance(widget, QCheckBox):
+            widget.setChecked(bool(value))
+        else:
+            widget.setText(str(value or ""))
+
     def _load_settings(self) -> None:
         """Populate the form from the current persisted settings."""
-        self._use_external_checkbox.setChecked(self._settings.use_external_ytdlp)
-        self._ytdlp_path_input.setText(self._settings.ytdlp_path)
-        self._ffmpeg_path_input.setText(self._settings.ffmpeg_path)
-        self._ytdlp_path_input.setEnabled(self._settings.use_external_ytdlp)
+        for name, widget in self._field_widgets.items():
+            self._write_widget(widget, self._controller.read_setting(name))
 
-        self._openai_api_key.setText(self._settings.openai_api_key)
-        self._openai_model.setText(self._settings.openai_model)
-        self._anthropic_api_key.setText(self._settings.anthropic_api_key)
-        self._anthropic_model.setText(self._settings.anthropic_model)
-        self._vertex_api_key.setText(self._settings.vertex_api_key)
-        self._vertex_model.setText(self._settings.vertex_model)
-        self._compatible_base_url.setText(self._settings.compatible_base_url)
-        self._compatible_bearer_token.setText(self._settings.compatible_bearer_token)
-        self._compatible_model.setText(self._settings.compatible_model)
+        self._ytdlp_path_input.setEnabled(
+            bool(self._controller.read_setting("use_external_ytdlp"))
+        )
 
-        provider = self._settings.llm_provider
+        provider = LlmProvider(self._controller.read_setting("llm_provider"))
         radio_map = {
             LlmProvider.CHATGPT_LITE: self._none_radio,
             LlmProvider.NONE: self._none_radio,
@@ -272,22 +303,11 @@ class SettingsDialog(QDialog):
         self._update_llm_field_visibility()
 
     def _on_save(self) -> None:
-        """Persist the form values and close the dialog."""
-        self._settings.use_external_ytdlp = self._use_external_checkbox.isChecked()
-        self._settings.ytdlp_path = self._ytdlp_path_input.text()
-        self._settings.ffmpeg_path = self._ffmpeg_path_input.text()
+        """Persist the form values through the controller and close."""
+        for name, widget in self._field_widgets.items():
+            self._controller.update_setting(name, self._read_widget(widget))
 
-        self._settings.openai_api_key = self._openai_api_key.text()
-        self._settings.openai_model = self._openai_model.text()
-        self._settings.anthropic_api_key = self._anthropic_api_key.text()
-        self._settings.anthropic_model = self._anthropic_model.text()
-        self._settings.vertex_api_key = self._vertex_api_key.text()
-        self._settings.vertex_model = self._vertex_model.text()
-        self._settings.compatible_base_url = self._compatible_base_url.text()
-        self._settings.compatible_bearer_token = self._compatible_bearer_token.text()
-        self._settings.compatible_model = self._compatible_model.text()
-
-        self._settings.llm_provider = self._selected_llm_provider()
-
-        self._settings.sync()
+        self._controller.update_setting(
+            "llm_provider", self._selected_llm_provider().value
+        )
         self.accept()

@@ -1,6 +1,11 @@
-"""Main application window."""
+"""Main application window.
 
-from PySide6.QtCore import QThreadPool, QTimer
+A thin view over :class:`AppController`: it lays widgets out, forwards their
+input to the controller, and renders whatever the controller reports back.
+All workflow and validation logic lives in the controller, shared with the
+QML front-end.
+"""
+
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -11,13 +16,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..core import parse_tracklist_with_template
-from ..llm import is_llm_configured, launch_chatgpt_lite_assist
-from ..core.settings import LlmProvider, get_settings
-from ..models import DownloadJob
-from ..utils import is_ffmpeg_available, is_valid_youtube_url
+from ..controller import AppController, stage_label
 from ..resources import APP_LOGO_PNG
-from ..workers import PipelineWorker, TracklistAiWorker, VideoInfoWorker
 from .widgets import (
     DirectoryPickerWidget,
     MetadataInputWidget,
@@ -32,23 +32,19 @@ from .widgets import (
 class MainWindow(QMainWindow):
     """Main application window."""
 
-    URL_DEBOUNCE_MS = 500
+    def __init__(self, controller: AppController | None = None):
+        """Initialize the window.
 
-    def __init__(self):
+        Args:
+            controller: Shared application controller. Created if omitted.
+        """
         super().__init__()
-        self._thread_pool = QThreadPool()
-        self._current_worker: PipelineWorker | None = None
-        self._video_info_worker: VideoInfoWorker | None = None
-        self._tracklist_ai_worker: TracklistAiWorker | None = None
-        self._ai_analyzing = False
-        self._url_debounce_timer = QTimer()
-        self._url_debounce_timer.setSingleShot(True)
-        self._url_debounce_timer.timeout.connect(self._fetch_video_info)
-        self._last_fetched_url = ""
+        self._controller = controller or AppController(parent=self)
         self._setup_ui()
         self._setup_menu()
-        self._connect_signals()
-        self._check_ffmpeg()
+        self._connect_widgets()
+        self._connect_controller()
+        self._sync_initial_state()
 
     def _setup_ui(self) -> None:
         """Initialize and layout all UI components."""
@@ -116,291 +112,80 @@ class MainWindow(QMainWindow):
         file_menu.addAction(settings_action)
 
     def _open_settings_dialog(self) -> None:
-        """Open the settings dialog and re-check ffmpeg availability afterward."""
-        dialog = SettingsDialog(self)
-        if dialog.exec():
-            self._check_ffmpeg()
-            self._update_ai_availability()
+        """Open the settings dialog; the controller applies any changes."""
+        SettingsDialog(self._controller, self).exec()
 
-    def _update_ai_availability(self) -> None:
-        """Enable the AI button when inputs and LLM settings are ready."""
-        has_tracklist = bool(self._tracklist_input.get_text().strip())
-        has_video = self._video_preview.get_video_info() is not None
-        configured = is_llm_configured(get_settings())
-        self._tracklist_input.set_ai_available(
-            has_tracklist and has_video and configured and not self._ai_analyzing
-        )
+    # ── Wiring ──────────────────────────────────────────────────────
 
-    def _on_ai_requested(self) -> None:
-        """Run LLM analysis on the raw track list."""
-        if self._ai_analyzing:
-            return
+    def _connect_widgets(self) -> None:
+        """Forward widget input to the controller."""
+        c = self._controller
+        self._url_input.url_changed.connect(c.set_url)
+        self._tracklist_input.template_changed.connect(c.set_template)
+        self._tracklist_input.tracklist_changed.connect(c.set_tracklist_text)
+        self._tracklist_input.ai_requested.connect(c.analyze_tracklist_with_ai)
+        self._metadata_input.artist_changed.connect(c.set_artist)
+        self._metadata_input.album_changed.connect(c.set_album)
+        self._directory_picker.directory_changed.connect(c.set_output_dir)
+        # Wrapped so QAbstractButton.clicked's "checked" argument is dropped.
+        self._start_button.clicked.connect(lambda: c.start_pipeline())
+        self._cancel_button.clicked.connect(lambda: c.cancel_pipeline())
 
-        video_info = self._video_preview.get_video_info()
-        if video_info is None:
-            QMessageBox.warning(
-                self,
-                "AI Assist",
-                "Please wait for video info to load before using AI.",
-            )
-            return
+    def _connect_controller(self) -> None:
+        """Render controller state changes in the widgets."""
+        c = self._controller
 
-        raw_tracklist = self._tracklist_input.get_text()
-        if not raw_tracklist.strip():
-            return
+        c.urlErrorChanged.connect(self._url_input.set_error)
+        c.videoLoadingStarted.connect(self._video_preview.set_loading)
+        c.videoInfoLoaded.connect(self._video_preview.set_video_info)
+        c.videoInfoFailed.connect(self._video_preview.set_error)
+        c.videoCleared.connect(self._video_preview.clear)
 
-        settings = get_settings()
-        if not is_llm_configured(settings):
-            QMessageBox.warning(
-                self,
-                "AI Assist",
-                "LLM is not configured. Add API credentials in Settings.",
-            )
-            return
+        c.templateChanged.connect(self._tracklist_input.set_template)
+        c.templateErrorChanged.connect(self._tracklist_input.set_template_error)
+        c.tracklistErrorChanged.connect(self._tracklist_input.set_error)
+        c.previewChanged.connect(self._tracklist_input.set_preview)
 
-        if settings.llm_provider == LlmProvider.CHATGPT_LITE:
-            ok, message = launch_chatgpt_lite_assist(
-                video_info.title,
-                raw_tracklist,
-            )
-            if ok:
-                QMessageBox.information(self, "AI Assist", message)
-            else:
-                QMessageBox.warning(self, "AI Assist", message)
-            return
+        c.artistChanged.connect(self._metadata_input.set_artist)
+        c.albumChanged.connect(self._metadata_input.set_album)
+        c.albumPlaceholderChanged.connect(self._metadata_input.set_album_placeholder)
+        c.metadataErrorChanged.connect(self._metadata_input.set_error)
+        c.dirErrorChanged.connect(self._directory_picker.set_error)
 
-        self._ai_analyzing = True
-        self._tracklist_input.set_ai_loading(True)
-        self._update_ai_availability()
+        c.aiAvailableChanged.connect(self._tracklist_input.set_ai_available)
+        c.aiAnalyzingChanged.connect(self._tracklist_input.set_ai_loading)
+        c.aiMessage.connect(self._on_ai_message)
 
-        self._tracklist_ai_worker = TracklistAiWorker(
-            get_settings(),
-            video_info.title,
-            raw_tracklist,
-        )
-        self._tracklist_ai_worker.signals.finished.connect(self._on_ai_finished)
-        self._tracklist_ai_worker.signals.error.connect(self._on_ai_error)
-        self._thread_pool.start(self._tracklist_ai_worker)
+        c.busyChanged.connect(self._on_busy_changed)
+        c.progressChanged.connect(self._on_progress)
+        c.logMessage.connect(self._progress_panel.add_message)
+        c.pipelineFinished.connect(self._on_finished)
+        c.pipelineFailed.connect(self._on_error)
 
-    def _on_ai_finished(self, result) -> None:
-        """Apply LLM extraction results to the form."""
-        self._ai_analyzing = False
-        self._tracklist_input.set_ai_loading(False)
-        self._tracklist_input.set_template(result.template)
-        if result.artist_name:
-            self._metadata_input.set_artist(result.artist_name)
-        if result.album_name:
-            self._metadata_input.set_album(result.album_name)
-        self._update_ai_availability()
+        c.ffmpegAvailableChanged.connect(self._on_ffmpeg_availability_changed)
 
-    def _on_ai_error(self, message: str) -> None:
-        """Display an AI extraction error."""
-        self._ai_analyzing = False
-        self._tracklist_input.set_ai_loading(False)
-        self._update_ai_availability()
-        QMessageBox.critical(self, "AI Assist", message)
+    def _sync_initial_state(self) -> None:
+        """Push the controller's starting state into the freshly built widgets."""
+        self._tracklist_input.set_ai_available(self._controller.ai_available)
+        self._tracklist_input.set_preview(self._controller.current_preview())
+        if not self._controller.ffmpeg_available:
+            self._warn_ffmpeg_missing()
 
-    def _connect_signals(self) -> None:
-        """Connect widget signals to slots."""
-        self._start_button.clicked.connect(self._on_start_clicked)
-        self._cancel_button.clicked.connect(self._on_cancel_clicked)
-        self._url_input.url_changed.connect(self._on_url_changed)
-        self._tracklist_input.tracklist_changed.connect(self._update_ai_availability)
-        self._tracklist_input.ai_requested.connect(self._on_ai_requested)
-        self._update_ai_availability()
+    # ── Controller event handlers ───────────────────────────────────
 
-    def _check_ffmpeg(self) -> None:
-        """Check if ffmpeg is available."""
-        ffmpeg_command = get_settings().resolved_ffmpeg_command()
-        if not is_ffmpeg_available(ffmpeg_command):
-            QMessageBox.warning(
-                self,
-                "FFmpeg Not Found",
-                f"FFmpeg was not found at '{ffmpeg_command}'.\n\n"
-                "Please install FFmpeg, ensure it's in your PATH, or set a "
-                "custom path in Settings.\n\n"
-                "On Linux: sudo apt install ffmpeg\n"
-                "On macOS: brew install ffmpeg\n"
-                "On Windows: Download from ffmpeg.org",
-            )
+    def _on_ai_message(self, message: str, is_error: bool) -> None:
+        """Show an AI assist message."""
+        if is_error:
+            QMessageBox.warning(self, "AI Assist", message)
+        else:
+            QMessageBox.information(self, "AI Assist", message)
 
-    def _on_url_changed(self, url: str) -> None:
-        """Handle URL input changes with debouncing."""
-        self._url_debounce_timer.stop()
-
-        if not url:
-            self._video_preview.clear()
-            self._last_fetched_url = ""
-            self._update_ai_availability()
-            return
-
-        if not is_valid_youtube_url(url):
-            self._video_preview.clear()
-            self._update_ai_availability()
-            return
-
-        if url == self._last_fetched_url:
-            return
-
-        self._url_debounce_timer.start(self.URL_DEBOUNCE_MS)
-
-    def _fetch_video_info(self) -> None:
-        """Fetch video info for the current URL."""
-        url = self._url_input.get_url()
-
-        if not url or not is_valid_youtube_url(url):
-            return
-
-        if url == self._last_fetched_url:
-            return
-
-        self._last_fetched_url = url
-        self._video_preview.set_loading()
-
-        self._video_info_worker = VideoInfoWorker(url)
-        self._video_info_worker.signals.finished.connect(self._on_video_info_loaded)
-        self._video_info_worker.signals.error.connect(self._on_video_info_error)
-
-        self._thread_pool.start(self._video_info_worker)
-
-    def _on_video_info_loaded(self, info) -> None:
-        """Handle successful video info fetch."""
-        self._video_preview.set_video_info(info)
-        # Set default album name to video title
-        self._metadata_input.set_album_placeholder(info.title)
-        self._update_ai_availability()
-
-    def _on_video_info_error(self, message: str) -> None:
-        """Handle video info fetch error."""
-        self._video_preview.set_error(message)
-        self._url_input.set_error(message)
-        self._update_ai_availability()
-
-    def _on_start_clicked(self) -> None:
-        """Validate inputs and start pipeline worker."""
-        self._clear_errors()
-
-        url_valid, url_error = self._url_input.validate()
-        if not url_valid:
-            self._url_input.set_error(url_error)
-            return
-
-        video_info = self._video_preview.get_video_info()
-        if video_info is None:
-            self._url_input.set_error("Please wait for video info to load")
-            return
-
-        tracks_valid, tracks_error = self._tracklist_input.validate()
-        if not tracks_valid:
-            self._tracklist_input.set_error(tracks_error)
-            return
-
-        metadata_valid, metadata_error = self._metadata_input.validate()
-        if not metadata_valid:
-            self._metadata_input.set_error(metadata_error)
-            return
-
-        dir_valid, dir_error = self._directory_picker.validate()
-        if not dir_valid:
-            self._directory_picker.set_error(dir_error)
-            return
-
-        tracks = parse_tracklist_with_template(
-            self._tracklist_input.get_text(),
-            self._tracklist_input.get_template(),
-        )
-
-        # Get metadata - album defaults to video title if not specified
-        artist = self._metadata_input.get_artist() or None
-        album = self._metadata_input.get_album() or video_info.title
-
-        job = DownloadJob(
-            url=self._url_input.get_url(),
-            output_dir=self._directory_picker.get_directory(),
-            tracks=tuple(tracks),
-            artist=artist,
-            album=album,
-            thumbnail_url=video_info.thumbnail_url,
-        )
-
-        self._start_pipeline(job)
-
-    def _start_pipeline(self, job: DownloadJob) -> None:
-        """Start the pipeline worker."""
-        self._set_ui_busy(True)
-        self._progress_panel.clear()
-        self._progress_panel.reset_style()
-        self._progress_panel.add_message("Starting...", "info")
-
-        self._current_worker = PipelineWorker(job)
-        self._current_worker.signals.started.connect(self._on_worker_started)
-        self._current_worker.signals.progress.connect(self._on_progress)
-        self._current_worker.signals.log.connect(self._on_log)
-        self._current_worker.signals.finished.connect(self._on_finished)
-        self._current_worker.signals.error.connect(self._on_error)
-
-        self._thread_pool.start(self._current_worker)
-
-    def _on_cancel_clicked(self) -> None:
-        """Cancel the current operation."""
-        if self._current_worker:
-            self._current_worker.cancel()
-            self._progress_panel.add_message("Cancelling...", "warn")
-
-    def _on_worker_started(self) -> None:
-        """Handle worker start."""
-        self._progress_panel.add_message("Worker started", "info")
-
-    def _on_progress(self, stage: str, percent: float, message: str) -> None:
-        """Update progress display."""
-        stage_display = {
-            "download": "Downloading",
-            "split": "Splitting",
-            "tagging": "Tagging",
-            "complete": "Complete",
-        }.get(stage, stage.title())
-
-        self._progress_panel.set_stage(f"{stage_display}: {int(percent)}%")
-        self._progress_panel.set_progress(percent)
-        self._progress_panel.add_message(message, "info")
-
-    def _on_log(self, message: str) -> None:
-        """Handle log messages from pipeline."""
-        self._progress_panel.add_message(message, "debug")
-
-    def _on_finished(self, output_files: list) -> None:
-        """Handle successful completion."""
-        self._set_ui_busy(False)
-        self._progress_panel.set_complete()
-
-        self._progress_panel.add_message(
-            f"Successfully created {len(output_files)} track(s)!",
-            "info",
-        )
-
-        for path in output_files:
-            self._progress_panel.add_message(f"  - {path}", "info")
-
-        QMessageBox.information(
-            self,
-            "Complete",
-            f"Successfully split audio into {len(output_files)} track(s)!",
-        )
-
-    def _on_error(self, message: str) -> None:
-        """Display error to user."""
-        self._set_ui_busy(False)
-        self._progress_panel.set_error()
-        self._progress_panel.add_message(message, "error")
-
-        QMessageBox.critical(
-            self,
-            "Error",
-            message,
-        )
-
-    def _set_ui_busy(self, busy: bool) -> None:
+    def _on_busy_changed(self, busy: bool) -> None:
         """Enable/disable UI during processing."""
+        if busy:
+            self._progress_panel.clear()
+            self._progress_panel.reset_style()
+
         self._url_input.set_enabled(not busy)
         self._tracklist_input.set_enabled(not busy)
         self._metadata_input.set_enabled(not busy)
@@ -408,9 +193,43 @@ class MainWindow(QMainWindow):
         self._start_button.setEnabled(not busy)
         self._cancel_button.setEnabled(busy)
 
-    def _clear_errors(self) -> None:
-        """Clear all validation errors."""
-        self._url_input.clear_error()
-        self._tracklist_input.clear_error()
-        self._metadata_input.clear_error()
-        self._directory_picker.clear_error()
+    def _on_progress(self, stage: str, percent: float, _message: str) -> None:
+        """Update the progress display."""
+        if stage == "starting":
+            self._progress_panel.set_stage("Starting...")
+        else:
+            self._progress_panel.set_stage(f"{stage_label(stage)}: {int(percent)}%")
+        self._progress_panel.set_progress(percent)
+
+    def _on_finished(self, output_files: list) -> None:
+        """Handle successful completion."""
+        self._progress_panel.set_complete()
+        QMessageBox.information(
+            self,
+            "Complete",
+            f"Successfully split audio into {len(output_files)} track(s)!",
+        )
+
+    def _on_error(self, message: str) -> None:
+        """Display a pipeline error."""
+        self._progress_panel.set_error()
+        QMessageBox.critical(self, "Error", message)
+
+    def _on_ffmpeg_availability_changed(self, available: bool) -> None:
+        """Warn when a settings change made ffmpeg unreachable."""
+        if not available:
+            self._warn_ffmpeg_missing()
+
+    def _warn_ffmpeg_missing(self) -> None:
+        """Tell the user where ffmpeg was expected and how to install it."""
+        command = self._controller.settings.resolved_ffmpeg_command()
+        QMessageBox.warning(
+            self,
+            "FFmpeg Not Found",
+            f"FFmpeg was not found at '{command}'.\n\n"
+            "Please install FFmpeg, ensure it's in your PATH, or set a "
+            "custom path in Settings.\n\n"
+            "On Linux: sudo apt install ffmpeg\n"
+            "On macOS: brew install ffmpeg\n"
+            "On Windows: Download from ffmpeg.org",
+        )
