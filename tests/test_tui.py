@@ -1,6 +1,7 @@
 """Interaction tests for the Textual TUI, driven headlessly with Pilot."""
 
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -272,6 +273,38 @@ class TestPipeline:
             assert not isinstance(app.screen, ConfirmScreen)
             fake_pipeline.gate.set()
             await wait_for(pilot, lambda: not app.busy)
+
+
+class TestQuitWhileRunning:
+    async def test_confirmed_quit_cancels_and_exits_promptly(
+        self, settings, fake_video, fake_pipeline
+    ):
+        # The real pipeline logs (via call_from_thread) while cleaning up after
+        # cancel; quitting must not block the UI thread or the two deadlock.
+        class LoggingCancelPipeline(FakePipeline):
+            def cancel(self):
+                super().cancel()
+                FakePipeline.gate.set()
+
+            def execute(self, job):
+                result = super().execute(job)
+                self.log_callback("Cancelled; removing partial output.")
+                return result
+
+        fake_pipeline.gate = threading.Event()
+        app_module.DownloadSplitPipeline = LoggingCancelPipeline
+        app = make_app(settings)
+        async with app.run_test(size=SIZE) as pilot:
+            await fill_form(app, pilot)
+            await pilot.press("f5")
+            await wait_for(pilot, lambda: app.busy)
+            await pilot.press("ctrl+q")
+            await pilot.pause()
+            start = time.monotonic()
+            await pilot.click("#confirm-yes")
+            await wait_for(pilot, lambda: not app.is_running, attempts=200)
+            assert time.monotonic() - start < 2
+            assert fake_pipeline.instances[0].cancelled is True
 
 
 class TestAiAssist:

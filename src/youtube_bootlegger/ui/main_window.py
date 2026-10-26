@@ -369,8 +369,13 @@ class MainWindow(QMainWindow):
         self._progress_panel.add_message(message, "debug")
 
     def _on_finished(self, output_files: list) -> None:
-        """Handle successful completion."""
+        """Handle completion; an empty result means the job was cancelled."""
         self._set_ui_busy(False)
+        if not output_files:
+            self._progress_panel.set_stage("Cancelled")
+            self._progress_panel.add_message("Cancelled.", "warn")
+            return
+
         self._progress_panel.set_complete()
 
         self._progress_panel.add_message(

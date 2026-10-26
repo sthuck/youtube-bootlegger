@@ -6,7 +6,8 @@ from pathlib import Path
 
 from ..models import Track
 from ..utils import format_seconds_to_timestamp, sanitize_filename
-from .exceptions import FFmpegNotFoundError, SplitError
+from .cancellation import CancelToken
+from .exceptions import FFmpegNotFoundError, OperationCancelledError, SplitError
 from .settings import AppSettings, get_settings
 
 
@@ -18,6 +19,7 @@ class AudioSplitter:
         progress_callback: Callable[[int, int, str], None] | None = None,
         log_callback: Callable[[str], None] | None = None,
         settings: AppSettings | None = None,
+        cancel_token: CancelToken | None = None,
     ):
         """Initialize the splitter.
 
@@ -25,7 +27,9 @@ class AudioSplitter:
             progress_callback: Callback for progress (current, total, track_name).
             log_callback: Callback for log messages.
             settings: Application settings. Defaults to the shared singleton.
+            cancel_token: Stops the running ffmpeg and the split when triggered.
         """
+        self._cancel = cancel_token or CancelToken()
         self._progress_callback = progress_callback
         self._log_callback = log_callback
         self._ffmpeg_command = (settings or get_settings()).resolved_ffmpeg_command()
@@ -56,6 +60,8 @@ class AudioSplitter:
         Raises:
             SplitError: If splitting fails.
             FFmpegNotFoundError: If ffmpeg is not available.
+            OperationCancelledError: If cancelled. Files written by this call,
+                including a partially written one, are removed first.
         """
         self._check_ffmpeg()
 
@@ -65,17 +71,29 @@ class AudioSplitter:
         output_dir.mkdir(parents=True, exist_ok=True)
         output_files: list[Path] = []
 
-        for i, track in enumerate(tracks, 1):
-            if self._progress_callback:
-                self._progress_callback(i, len(tracks), track.name)
+        try:
+            for i, track in enumerate(tracks, 1):
+                self._cancel.raise_if_cancelled()
+                if self._progress_callback:
+                    self._progress_callback(i, len(tracks), track.name)
 
-            safe_name = sanitize_filename(track.name)
-            output_file = output_dir / f"{i:02d} - {safe_name}.{audio_format}"
-
-            self._run_ffmpeg(input_file, output_file, track)
-            output_files.append(output_file)
+                safe_name = sanitize_filename(track.name)
+                output_file = output_dir / f"{i:02d} - {safe_name}.{audio_format}"
+                output_files.append(output_file)
+                self._run_ffmpeg(input_file, output_file, track)
+        except OperationCancelledError:
+            self._remove_files(output_files)
+            raise
 
         return output_files
+
+    def _remove_files(self, files: list[Path]) -> None:
+        """Delete outputs of a cancelled split so no half album is left behind."""
+        for file in files:
+            try:
+                file.unlink(missing_ok=True)
+            except OSError as e:
+                self._log(f"Could not remove {file}: {e}")
 
     def _check_ffmpeg(self) -> None:
         """Verify ffmpeg is available."""
@@ -127,21 +145,21 @@ class AudioSplitter:
         self._log(f"Running: {' '.join(cmd)}")
 
         try:
-            result = subprocess.run(
+            with self._cancel.child_process(
                 cmd,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                timeout=300,
-            )
-
-            if result.returncode != 0:
-                raise SplitError(
-                    f"FFmpeg failed for '{track.name}': {result.stderr}"
-                )
-
-            self._log(f"Created: {output_file}")
-
+            ) as process:
+                _, stderr = process.communicate(timeout=300)
         except subprocess.TimeoutExpired as e:
             raise SplitError(f"FFmpeg timed out for '{track.name}'") from e
-        except subprocess.SubprocessError as e:
+        except (OSError, subprocess.SubprocessError) as e:
             raise SplitError(f"FFmpeg error for '{track.name}': {e}") from e
+
+        # A cancelled (killed) ffmpeg exits non-zero; report it as a cancel.
+        self._cancel.raise_if_cancelled()
+        if process.returncode != 0:
+            raise SplitError(f"FFmpeg failed for '{track.name}': {stderr}")
+
+        self._log(f"Created: {output_file}")

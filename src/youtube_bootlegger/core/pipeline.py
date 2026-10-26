@@ -6,7 +6,10 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ..models import DownloadJob
+from .cancellation import CancelToken
 from .downloader import AudioDownloader
+from .exceptions import OperationCancelledError
+from .settings import AppSettings, get_settings
 from .splitter import AudioSplitter
 from .tagger import tag_audio_files
 
@@ -18,16 +21,21 @@ class DownloadSplitPipeline:
         self,
         progress_callback: Callable[[str, float, str], None] | None = None,
         log_callback: Callable[[str], None] | None = None,
+        settings: AppSettings | None = None,
     ):
-        """Initialize the pipeline.
+        """Initialize the pipeline. Each instance runs a single job.
 
         Args:
             progress_callback: Callback for progress (stage, percent, message).
             log_callback: Callback for log messages.
+            settings: Application settings. Defaults to the shared singleton.
         """
         self._progress_callback = progress_callback
         self._log_callback = log_callback
-        self._cancelled = False
+        self._settings = settings or get_settings()
+        # Created up front (not in execute) so a cancel() that arrives before
+        # execute() starts is still honoured.
+        self._cancel = CancelToken()
 
     def _log(self, message: str) -> None:
         """Emit a log message."""
@@ -41,28 +49,30 @@ class DownloadSplitPipeline:
             job: The download job to execute.
 
         Returns:
-            List of output file paths.
+            List of output file paths, or an empty list if cancelled. A
+            cancelled run leaves no output files behind.
 
         Raises:
             Various exceptions from downloader and splitter.
         """
-        self._cancelled = False
         temp_dir = Path(tempfile.mkdtemp(prefix="youtube-bootlegger-"))
+        output_dir: Path | None = None
+        output_files: list[Path] = []
 
         try:
+            self._cancel.raise_if_cancelled()
             self._emit_progress("download", 0, "Starting download...")
 
             downloader = AudioDownloader(
                 output_dir=temp_dir,
                 progress_callback=self._on_download_progress,
                 log_callback=self._log,
+                settings=self._settings,
+                cancel_token=self._cancel,
             )
-
             audio_file = downloader.download(job.url)
 
-            if self._cancelled:
-                return []
-
+            self._cancel.raise_if_cancelled()
             self._emit_progress("split", 0, "Starting split...")
 
             # Create output subdirectory based on artist/album
@@ -71,8 +81,9 @@ class DownloadSplitPipeline:
             splitter = AudioSplitter(
                 progress_callback=self._on_split_progress,
                 log_callback=self._log,
+                settings=self._settings,
+                cancel_token=self._cancel,
             )
-
             output_files = splitter.split(
                 input_file=audio_file,
                 output_dir=output_dir,
@@ -80,8 +91,7 @@ class DownloadSplitPipeline:
                 audio_format=job.audio_format,
             )
 
-            if self._cancelled:
-                return []
+            self._cancel.raise_if_cancelled()
 
             # Apply metadata tags
             self._emit_progress("tagging", 0, "Applying metadata tags...")
@@ -90,12 +100,30 @@ class DownloadSplitPipeline:
             self._emit_progress("complete", 100, "Complete!")
             return output_files
 
+        except OperationCancelledError:
+            self._log("Cancelled; removing partial output.")
+            self._remove_outputs(output_files, output_dir)
+            return []
+
         finally:
             self._cleanup_temp(temp_dir)
 
     def cancel(self) -> None:
-        """Request cancellation of the pipeline."""
-        self._cancelled = True
+        """Cancel the pipeline, stopping any running download or split immediately."""
+        self._cancel.cancel()
+
+    def _remove_outputs(self, files: list[Path], output_dir: Path | None) -> None:
+        """Delete a cancelled run's outputs, and its folder if left empty."""
+        for file in files:
+            try:
+                file.unlink(missing_ok=True)
+            except OSError as e:
+                self._log(f"Could not remove {file}: {e}")
+        if output_dir is not None:
+            try:
+                output_dir.rmdir()  # Only succeeds if empty; keeps pre-existing files.
+            except OSError:
+                pass
 
     def _emit_progress(self, stage: str, percent: float, message: str) -> None:
         """Emit progress update."""

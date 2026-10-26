@@ -593,6 +593,10 @@ class AppBackend(QObject):
 
     def _on_finished(self, output_files: list):
         self._emit("_busy", False, self.busyChanged)
+        if not output_files:  # An empty result means the job was cancelled.
+            self._emit("_progress_stage", "Cancelled", self.progressStageChanged)
+            self._log_model.append("Cancelled.", "warn")
+            return
         self._emit("_progress_percent", 100.0, self.progressPercentChanged)
         self._emit("_progress_stage", "Complete!", self.progressStageChanged)
         self._log_model.append(f"Successfully created {len(output_files)} track(s)!", "info")

@@ -1,5 +1,6 @@
 """Textual application: the terminal front-end for YouTube Bootlegger."""
 
+import asyncio
 import threading
 from collections.abc import Callable
 from pathlib import Path
@@ -41,6 +42,9 @@ from .theme import BOOTLEGGER_THEME
 from .widgets import ProgressPanel, StatusLog, TrackPreviewTable, VideoPanel
 
 URL_DEBOUNCE_SECONDS = 0.5
+# On quit mid-job: how long to let a cancelled pipeline kill its child
+# processes and delete partial files before exiting anyway.
+QUIT_CLEANUP_TIMEOUT_SECONDS = 5
 
 ERROR_WIDGET_IDS = {
     FormField.URL: "url-error",
@@ -93,6 +97,7 @@ class BootleggerApp(App[None]):
         self._last_fetched_url = ""
         self._url_timer: Timer | None = None
         self._pipeline: DownloadSplitPipeline | None = None
+        self._pipeline_stopped = threading.Event()
 
     # ── Layout ──────────────────────────────────────────────────────
 
@@ -299,7 +304,7 @@ class BootleggerApp(App[None]):
     def action_cancel(self) -> None:
         if self._pipeline is not None and self.busy:
             self._pipeline.cancel()
-            self._log("Cancelling after the current step finishes...", "warn")
+            self._log("Cancelling...", "warn")
 
     def _read_form(self) -> JobForm:
         return JobForm(
@@ -316,6 +321,7 @@ class BootleggerApp(App[None]):
         self.query_one(StatusLog).clear()
         self.query_one(ProgressPanel).set_progress("Starting...", 0)
         self._log(f"Starting: {job.track_count} track(s) → {job.output_dir}")
+        self._pipeline_stopped.clear()
         self._pipeline = DownloadSplitPipeline(
             progress_callback=lambda *args: self._post(self._on_progress, *args),
             log_callback=lambda msg: self._post(self._log, msg, "debug"),
@@ -331,6 +337,8 @@ class BootleggerApp(App[None]):
         except Exception as e:
             self._post(self._on_pipeline_error, f"Unexpected error: {e}")
             return
+        finally:
+            self._pipeline_stopped.set()
         self._post(self._on_pipeline_finished, output_files)
 
     def _on_progress(self, stage: str, percent: float, message: str) -> None:
@@ -455,11 +463,20 @@ class BootleggerApp(App[None]):
             self.exit()
             return
 
-        def on_close(confirmed: bool | None) -> None:
-            if confirmed:
-                if self._pipeline is not None:
-                    self._pipeline.cancel()
-                self.exit()
+        async def on_close(confirmed: bool | None) -> None:
+            if not confirmed:
+                return
+            if self._pipeline is not None:
+                self._pipeline.cancel()
+                self._log("Stopping...", "warn")
+                # Cancel kills the running yt-dlp/ffmpeg at once; give the
+                # worker a moment to delete temp and partial files. Wait off
+                # the UI thread: the worker posts log lines to it while
+                # cleaning up, so blocking here would deadlock.
+                await asyncio.to_thread(
+                    self._pipeline_stopped.wait, QUIT_CLEANUP_TIMEOUT_SECONDS
+                )
+            self.exit()
 
         self.push_screen(
             ConfirmScreen(

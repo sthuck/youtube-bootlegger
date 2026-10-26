@@ -23,3 +23,7 @@ class SplitError(YouTubeBootleggerError):
 
 class FFmpegNotFoundError(YouTubeBootleggerError):
     """FFmpeg is not installed or not in PATH."""
+
+
+class OperationCancelledError(YouTubeBootleggerError):
+    """The user cancelled a running download or split."""

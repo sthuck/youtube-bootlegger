@@ -10,7 +10,8 @@ from pathlib import Path
 
 import yt_dlp
 
-from .exceptions import DownloadError
+from .cancellation import CancelToken
+from .exceptions import DownloadError, OperationCancelledError
 from .settings import AppSettings, get_settings
 
 _PROGRESS_RE = re.compile(r"\[download\]\s+(\d{1,3}(?:\.\d+)?)%")
@@ -41,6 +42,7 @@ class AudioDownloader:
         progress_callback: Callable[[float, str], None] | None = None,
         log_callback: Callable[[str], None] | None = None,
         settings: AppSettings | None = None,
+        cancel_token: CancelToken | None = None,
     ):
         """Initialize the downloader.
 
@@ -49,12 +51,14 @@ class AudioDownloader:
             progress_callback: Callback for progress updates (percent, status).
             log_callback: Callback for log messages.
             settings: Application settings. Defaults to the shared singleton.
+            cancel_token: Cancels the download mid-way when triggered.
         """
         self._output_dir = output_dir or Path(tempfile.gettempdir())
         self._progress_callback = progress_callback
         self._log_callback = log_callback
         self._last_percent = 0.0
         self._settings = settings or get_settings()
+        self._cancel = cancel_token or CancelToken()
 
     def _log(self, message: str) -> None:
         """Emit a log message."""
@@ -72,6 +76,7 @@ class AudioDownloader:
 
         Raises:
             DownloadError: If the download fails.
+            OperationCancelledError: If cancelled via the cancel token.
         """
         if self._settings.use_external_ytdlp:
             return self._download_external(url)
@@ -95,6 +100,7 @@ class AudioDownloader:
             ],
             "outtmpl": output_template,
             "progress_hooks": [self._progress_hook],
+            "postprocessor_hooks": [self._postprocessor_hook],
             "quiet": True,
             "logger": _DownloadLogger(self._log),
         }
@@ -105,6 +111,9 @@ class AudioDownloader:
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
+                # yt-dlp's own mp3 conversion can't be interrupted; honour a
+                # cancel that arrived during it as soon as it returns.
+                self._cancel.raise_if_cancelled()
                 if info is None:
                     raise DownloadError("Failed to extract video information")
 
@@ -117,13 +126,27 @@ class AudioDownloader:
                 self._log(f"Downloaded to: {audio_path}")
                 return audio_path
 
+        except yt_dlp.utils.DownloadCancelled as e:
+            raise OperationCancelledError("Download cancelled") from e
+        except (OperationCancelledError, DownloadError):
+            raise
         except yt_dlp.utils.DownloadError as e:
             raise DownloadError(f"Download failed: {e}") from e
         except Exception as e:
             raise DownloadError(f"Unexpected error during download: {e}") from e
 
+    def _abort_if_cancelled(self) -> None:
+        """Raise yt-dlp's own cancel exception so it stops the download cleanly."""
+        if self._cancel.cancelled:
+            raise yt_dlp.utils.DownloadCancelled("Download cancelled")
+
+    def _postprocessor_hook(self, d: dict) -> None:
+        """Stop before yt-dlp starts converting if cancel arrived meanwhile."""
+        self._abort_if_cancelled()
+
     def _progress_hook(self, d: dict) -> None:
-        """Handle yt-dlp progress updates."""
+        """Handle yt-dlp progress updates (and abort when cancelled)."""
+        self._abort_if_cancelled()
         if self._progress_callback is None:
             return
 
@@ -177,31 +200,32 @@ class AudioDownloader:
         self._log(f"yt-dlp executable: {shutil.which(command) or command}")
         self._log(f"Running: {shlex.join(cmd)}")
 
+        output_lines: list[str] = []
         try:
-            process = subprocess.Popen(
+            with self._cancel.child_process(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
-            )
+            ) as process:
+                assert process.stdout is not None
+                for raw_line in process.stdout:
+                    line = raw_line.rstrip()
+                    if not line:
+                        continue
+                    output_lines.append(line)
+                    self._log(line)
+                    self._report_external_progress(line)
+                returncode = process.wait()
         except FileNotFoundError as e:
             raise DownloadError(
                 f"yt-dlp executable not found: '{command}'. "
                 "Check the yt-dlp path in Settings."
             ) from e
 
-        output_lines: list[str] = []
-        assert process.stdout is not None
-        for raw_line in process.stdout:
-            line = raw_line.rstrip()
-            if not line:
-                continue
-            output_lines.append(line)
-            self._log(line)
-            self._report_external_progress(line)
-
-        returncode = process.wait()
+        # A cancelled (killed) process exits non-zero; report it as a cancel.
+        self._cancel.raise_if_cancelled()
         if returncode != 0:
             tail = "\n".join(output_lines[-10:])
             raise DownloadError(f"yt-dlp failed (exit code {returncode}): {tail}")
