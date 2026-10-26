@@ -1,6 +1,8 @@
 """YouTube audio downloader using yt-dlp."""
 
 import re
+import shlex
+import shutil
 import subprocess
 import tempfile
 from collections.abc import Callable
@@ -12,6 +14,22 @@ from .exceptions import DownloadError
 from .settings import AppSettings, get_settings
 
 _PROGRESS_RE = re.compile(r"\[download\]\s+(\d{1,3}(?:\.\d+)?)%")
+
+
+class _DownloadLogger:
+    """Forward yt-dlp diagnostics to the application's download log."""
+
+    def __init__(self, callback: Callable[[str], None]):
+        self._callback = callback
+
+    def debug(self, message: str) -> None:
+        self._callback(message)
+
+    def warning(self, message: str) -> None:
+        self._callback(f"WARNING: {message}")
+
+    def error(self, message: str) -> None:
+        self._callback(f"ERROR: {message}")
 
 
 class AudioDownloader:
@@ -64,6 +82,7 @@ class AudioDownloader:
         output_template = str(self._output_dir / "%(title)s.%(ext)s")
 
         self._log(f"Download directory: {self._output_dir}")
+        self._log(f"yt-dlp library version: {yt_dlp.version.__version__}")
 
         ydl_opts = {
             "format": "bestaudio/best",
@@ -77,7 +96,7 @@ class AudioDownloader:
             "outtmpl": output_template,
             "progress_hooks": [self._progress_hook],
             "quiet": True,
-            "no_warnings": True,
+            "logger": _DownloadLogger(self._log),
         }
 
         if self._settings.ffmpeg_path:
@@ -148,7 +167,6 @@ class AudioDownloader:
             "--audio-quality", "192",
             "-o", output_template,
             "--newline",
-            "--no-warnings",
         ]
 
         if self._settings.ffmpeg_path:
@@ -156,7 +174,8 @@ class AudioDownloader:
 
         cmd.append(url)
 
-        self._log(f"Running: {' '.join(cmd)}")
+        self._log(f"yt-dlp executable: {shutil.which(command) or command}")
+        self._log(f"Running: {shlex.join(cmd)}")
 
         try:
             process = subprocess.Popen(

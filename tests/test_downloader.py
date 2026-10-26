@@ -151,3 +151,62 @@ class TestDownloadExternalMissingExecutable:
                 assert False, "expected DownloadError"
             except DownloadError as e:
                 assert "/nonexistent/yt-dlp" in str(e)
+
+
+def test_library_warnings_reach_app_log(tmp_path, monkeypatch):
+    """Extraction warnings must remain visible even with quiet progress output."""
+    messages = []
+
+    class FakeYoutubeDL:
+        def __init__(self, options):
+            self.options = options
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def extract_info(self, url, download):
+            self.options["logger"].warning("No supported JavaScript runtime found")
+            (tmp_path / "song.mp3").write_bytes(b"audio")
+            return {"title": "song"}
+
+        def prepare_filename(self, info):
+            return str(tmp_path / "song.webm")
+
+    monkeypatch.setattr(
+        "src.youtube_bootlegger.core.downloader.yt_dlp.YoutubeDL", FakeYoutubeDL
+    )
+    downloader = AudioDownloader(
+        output_dir=tmp_path, log_callback=messages.append, settings=make_settings()
+    )
+
+    assert downloader.download("https://youtu.be/abc") == tmp_path / "song.mp3"
+    assert "WARNING: No supported JavaScript runtime found" in messages
+
+
+def test_external_executable_resolution_is_logged(tmp_path, monkeypatch):
+    """Show which executable a bare command selects from the app's PATH."""
+    from unittest.mock import Mock
+
+    messages = []
+    (tmp_path / "song.mp3").write_bytes(b"audio")
+    process = Mock(stdout=iter(["WARNING: challenge solving failed\n"]))
+    process.wait.return_value = 0
+    popen = Mock(return_value=process)
+    monkeypatch.setattr("src.youtube_bootlegger.core.downloader.subprocess.Popen", popen)
+    monkeypatch.setattr(
+        "src.youtube_bootlegger.core.downloader.shutil.which",
+        lambda command: "/app/.venv/bin/yt-dlp",
+    )
+    downloader = AudioDownloader(
+        output_dir=tmp_path,
+        log_callback=messages.append,
+        settings=make_settings(use_external=True),
+    )
+
+    assert downloader.download("https://youtu.be/abc") == tmp_path / "song.mp3"
+    assert "yt-dlp executable: /app/.venv/bin/yt-dlp" in messages
+    assert "WARNING: challenge solving failed" in messages
+    assert "--no-warnings" not in popen.call_args.args[0]
