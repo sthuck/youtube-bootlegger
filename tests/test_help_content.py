@@ -1,7 +1,7 @@
-"""Tests for QML help panel content."""
+"""Tests for help panel content."""
 
 from src.youtube_bootlegger.core.template_parser import DEFAULT_TEMPLATE
-from src.youtube_bootlegger.qml_backend.help_content import build_help_content
+from src.youtube_bootlegger.app_logic.help_content import build_help_content
 
 
 class TestHelpContent:

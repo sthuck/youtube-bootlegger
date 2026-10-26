@@ -1,10 +1,10 @@
-"""User-facing help text for the QML help panel."""
+"""User-facing help text shared by the QML and TUI help panels."""
 
 from ..core.template_parser import DEFAULT_TEMPLATE
 
 
 def build_help_content() -> dict:
-    """Return structured help text consumed by HelpPanel.qml."""
+    """Return structured help text consumed by the help panels."""
     return {
         "title": "How to Use YouTube Bootlegger",
         "intro": (

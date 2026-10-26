@@ -11,20 +11,24 @@ from PySide6.QtCore import (
     Slot,
 )
 
-from ..core import (
-    DEFAULT_TEMPLATE,
-    ParseError,
-    parse_tracklist_with_template,
-    preview_parse,
-    validate_template,
+from ..app_logic import (
+    FormError,
+    FormField,
+    JobForm,
+    build_help_content,
+    build_job,
+    check_ai_assist_ready,
+    format_progress_stage,
+    summarize_preview,
+    summarize_video,
 )
+from ..core import DEFAULT_TEMPLATE, preview_parse, validate_template
 from ..llm import is_llm_configured, launch_chatgpt_lite_assist
 from ..core.settings import LlmProvider, get_settings
 from ..core.video_info import VideoInfo
 from ..models import DownloadJob
 from ..utils import is_ffmpeg_available, is_valid_youtube_url
 from ..workers import PipelineWorker, TracklistAiWorker, VideoInfoWorker
-from .help_content import build_help_content
 from .models import StatusLogModel, TrackPreviewModel
 
 
@@ -400,21 +404,13 @@ class AppBackend(QObject):
     def analyzeTracklistWithAi(self):
         if self._ai_analyzing:
             return
-        if self._video_info is None:
-            self.showMessage.emit(
-                "AI Assist",
-                "Please wait for video info to load before using AI.",
-                True,
-            )
-            return
         if not self._tracklist_text.strip():
             return
-        if not is_llm_configured(self._app_settings):
-            self.showMessage.emit(
-                "AI Assist",
-                "LLM is not configured. Add API credentials in Settings.",
-                True,
-            )
+        problem = check_ai_assist_ready(
+            self._video_info, self._tracklist_text, self._app_settings
+        )
+        if problem:
+            self.showMessage.emit("AI Assist", problem, True)
             return
 
         if self._app_settings.llm_provider == LlmProvider.CHATGPT_LITE:
@@ -456,61 +452,31 @@ class AppBackend(QObject):
         self._emit("_dir_error", "", self.dirErrorChanged)
         self._emit("_metadata_error", "", self.metadataErrorChanged)
 
-        if not self._url:
-            self._emit("_url_error", "Please enter a YouTube URL", self.urlErrorChanged)
-            return
-        if not is_valid_youtube_url(self._url):
-            self._emit("_url_error", "Please enter a valid YouTube URL", self.urlErrorChanged)
-            return
-        if self._video_info is None:
-            self._emit("_url_error", "Please wait for video info to load", self.urlErrorChanged)
-            return
-
-        template = self._template or DEFAULT_TEMPLATE
-        tv = validate_template(template)
-        if not tv.is_valid:
-            self._emit(
-                "_template_error",
-                f"Invalid template: {tv.error}",
-                self.templateErrorChanged,
-            )
-            return
-
-        text = self._tracklist_text
-        if not text.strip():
-            return
-
-        try:
-            tracks = parse_tracklist_with_template(text, template)
-            if not tracks:
-                return
-        except ParseError:
-            return
-
-        if not self._artist and not self._album:
-            self._emit(
-                "_metadata_error",
-                "Please enter an artist name or album name",
-                self.metadataErrorChanged,
-            )
-            return
-
-        if not self._output_dir.strip():
-            self._emit("_dir_error", "Please select an output directory", self.dirErrorChanged)
-            return
-
-        artist = self._artist or None
-        album = self._album or self._video_info.title
-
-        job = DownloadJob(
+        form = JobForm(
             url=self._url,
-            output_dir=Path(self._output_dir),
-            tracks=tuple(tracks),
-            artist=artist,
-            album=album,
-            thumbnail_url=self._video_info.thumbnail_url,
+            template=self._template,
+            tracklist_text=self._tracklist_text,
+            artist=self._artist,
+            album=self._album,
+            output_dir=self._output_dir,
         )
-        self._run_pipeline(job)
+        result = build_job(form, self._video_info)
+        if isinstance(result, FormError):
+            self._show_form_error(result)
+            return
+        self._run_pipeline(result)
+
+    def _show_form_error(self, error: FormError):
+        targets = {
+            FormField.URL: ("_url_error", self.urlErrorChanged),
+            FormField.TEMPLATE: ("_template_error", self.templateErrorChanged),
+            FormField.METADATA: ("_metadata_error", self.metadataErrorChanged),
+            FormField.OUTPUT_DIR: ("_dir_error", self.dirErrorChanged),
+        }
+        # Track list problems are already shown row-by-row in the preview.
+        if error.field in targets:
+            attr, signal = targets[error.field]
+            self._emit(attr, error.message, signal)
 
     @Slot()
     def cancelPipeline(self):
@@ -537,13 +503,12 @@ class AppBackend(QObject):
 
     def _on_video_info_loaded(self, info: VideoInfo):
         self._video_info = info
-        title = info.title[:77] + "..." if len(info.title) > 80 else info.title
-        self._emit("_video_title", title, self.videoTitleChanged)
-        self._emit("_video_channel", info.channel, self.videoChannelChanged)
-        self._emit("_video_duration", f"Duration: {info.duration_string}", self.videoDurationChanged)
-        self._emit("_video_views", info.formatted_views, self.videoViewsChanged)
-        date_str = f"Uploaded: {info.formatted_date}" if info.formatted_date else ""
-        self._emit("_video_date", date_str, self.videoDateChanged)
+        summary = summarize_video(info)
+        self._emit("_video_title", summary.title, self.videoTitleChanged)
+        self._emit("_video_channel", summary.channel, self.videoChannelChanged)
+        self._emit("_video_duration", summary.duration, self.videoDurationChanged)
+        self._emit("_video_views", summary.views, self.videoViewsChanged)
+        self._emit("_video_date", summary.date, self.videoDateChanged)
         self._emit("_video_thumbnail_url", info.thumbnail_url, self.videoThumbnailUrlChanged)
         self._emit("_video_loading", False, self.videoLoadingChanged)
         self._emit("_video_loaded", True, self.videoLoadedChanged)
@@ -594,15 +559,9 @@ class AppBackend(QObject):
 
         self._track_model.update(preview.tracks)
 
-        if preview.total_lines == 0:
-            self._emit("_preview_status", "", self.previewStatusChanged)
-            self._emit("_preview_valid", True, self.previewValidChanged)
-        elif preview.is_valid:
-            self._emit("_preview_status", f"{preview.total_lines} tracks", self.previewStatusChanged)
-            self._emit("_preview_valid", True, self.previewValidChanged)
-        else:
-            self._emit("_preview_status", f"{preview.error_count} error(s)", self.previewStatusChanged)
-            self._emit("_preview_valid", False, self.previewValidChanged)
+        summary = summarize_preview(preview)
+        self._emit("_preview_status", summary.status, self.previewStatusChanged)
+        self._emit("_preview_valid", summary.is_valid, self.previewValidChanged)
 
     # ── Pipeline execution ──────────────────────────────────────────
 
@@ -625,14 +584,7 @@ class AppBackend(QObject):
         self._log_model.append("Worker started", "info")
 
     def _on_progress(self, stage: str, percent: float, message: str):
-        display = {
-            "download": "Downloading",
-            "split": "Splitting",
-            "tagging": "Tagging",
-            "complete": "Complete",
-        }.get(stage, stage.title())
-
-        self._emit("_progress_stage", f"{display}: {int(percent)}%", self.progressStageChanged)
+        self._emit("_progress_stage", format_progress_stage(stage, percent), self.progressStageChanged)
         self._emit("_progress_percent", percent, self.progressPercentChanged)
         self._log_model.append(message, "info")
 
@@ -641,6 +593,10 @@ class AppBackend(QObject):
 
     def _on_finished(self, output_files: list):
         self._emit("_busy", False, self.busyChanged)
+        if not output_files:  # An empty result means the job was cancelled.
+            self._emit("_progress_stage", "Cancelled", self.progressStageChanged)
+            self._log_model.append("Cancelled.", "warn")
+            return
         self._emit("_progress_percent", 100.0, self.progressPercentChanged)
         self._emit("_progress_stage", "Complete!", self.progressStageChanged)
         self._log_model.append(f"Successfully created {len(output_files)} track(s)!", "info")

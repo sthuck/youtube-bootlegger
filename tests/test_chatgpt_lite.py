@@ -66,7 +66,7 @@ class TestLaunchChatgptLiteAssist:
             return True
 
         monkeypatch.setattr(
-            "src.youtube_bootlegger.llm.chatgpt_lite.QDesktopServices.openUrl",
+            "PySide6.QtGui.QDesktopServices.openUrl",
             fake_open_url,
         )
 
@@ -87,7 +87,7 @@ class TestLaunchChatgptLiteAssist:
             return True
 
         monkeypatch.setattr(
-            "src.youtube_bootlegger.llm.chatgpt_lite.QDesktopServices.openUrl",
+            "PySide6.QtGui.QDesktopServices.openUrl",
             fake_open_url,
         )
 
@@ -98,3 +98,43 @@ class TestLaunchChatgptLiteAssist:
         assert opened[0] == "https://chatgpt.com/"
         assert qapp.clipboard().text().startswith("YouTube Bootlegger")
         assert "clipboard" in message.lower()
+
+
+class TestLaunchWithInjectedHandlers:
+    """Non-Qt front-ends (e.g. the TUI) inject their own browser/clipboard hooks."""
+
+    def test_uses_injected_open_url(self):
+        opened = []
+        copied = []
+        ok, _ = launch_chatgpt_lite_assist(
+            "Show",
+            "Song - 0:00",
+            open_url=lambda url: opened.append(url) or True,
+            copy_text=copied.append,
+        )
+        assert ok is True
+        assert len(opened) == 1
+        assert "Show" in unquote(urlparse(opened[0]).query)
+        assert copied == []
+
+    def test_long_prompt_uses_injected_clipboard(self):
+        opened = []
+        copied = []
+        long_tracklist = "\n".join(f"Song {i} - 0:{i:02d}" for i in range(200))
+        ok, message = launch_chatgpt_lite_assist(
+            "Show",
+            long_tracklist,
+            open_url=lambda url: opened.append(url) or True,
+            copy_text=copied.append,
+        )
+        assert ok is True
+        assert opened == ["https://chatgpt.com/"]
+        assert copied and copied[0].startswith("YouTube Bootlegger")
+        assert "clipboard" in message.lower()
+
+    def test_reports_browser_failure(self):
+        ok, message = launch_chatgpt_lite_assist(
+            "Show", "Song - 0:00", open_url=lambda url: False, copy_text=lambda t: None
+        )
+        assert ok is False
+        assert "browser" in message.lower()

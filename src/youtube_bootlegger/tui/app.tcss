@@ -1,0 +1,261 @@
+/* ── Main layout ─────────────────────────────────────────────── */
+
+#main {
+    height: 1fr;
+}
+
+#form {
+    width: 1fr;
+    padding: 0 1;
+}
+
+#video {
+    width: 42;
+    padding: 1 1;
+    border-left: tall $panel;
+    background: $surface;
+}
+
+.field-label {
+    color: $text-muted;
+    margin-top: 1;
+}
+
+.field-error {
+    color: $error;
+    display: none;
+}
+
+/* ── Track list + preview ───────────────────────────────────── */
+
+#tracks {
+    height: 1fr;
+    min-height: 8;
+}
+
+#tracklist-col,
+#preview-col {
+    width: 1fr;
+}
+
+#tracklist-col {
+    margin-right: 1;
+}
+
+#tracklist,
+#preview {
+    height: 1fr;
+}
+
+.label-row {
+    height: auto;
+}
+
+#preview-status {
+    width: 1fr;
+    content-align-horizontal: right;
+    color: $success;
+    margin-top: 1;
+}
+
+#preview-status.-invalid {
+    color: $error;
+}
+
+/* ── Template / metadata / output rows ───────────────────────── */
+
+#template-row,
+#output-row,
+#metadata-row {
+    height: auto;
+}
+
+#template,
+#output-dir {
+    width: 1fr;
+}
+
+#metadata-row > Vertical {
+    height: auto;
+    width: 1fr;
+}
+
+#metadata-row > Vertical:first-child {
+    margin-right: 1;
+}
+
+#ai-assist,
+#browse {
+    margin-left: 1;
+    min-width: 16;
+}
+
+/* ── Video panel ─────────────────────────────────────────────── */
+
+#thumbnail {
+    width: 100%;
+    height: auto;
+    max-height: 14;
+    margin-bottom: 1;
+}
+
+#video-title {
+    text-style: bold;
+}
+
+#video-channel {
+    color: $secondary;
+}
+
+#video-details {
+    color: $text-muted;
+    margin-top: 1;
+}
+
+#video.-error #video-title {
+    color: $error;
+}
+
+/* ── Actions, progress and log ──────────────────────────────── */
+
+#actions {
+    height: auto;
+    padding: 0 1;
+    background: $surface;
+}
+
+#actions Button {
+    margin-right: 1;
+}
+
+#progress {
+    height: 3;
+    width: 1fr;
+    align-vertical: middle;
+}
+
+#progress-stage {
+    width: 24;
+}
+
+#progress-bar {
+    width: 1fr;
+}
+
+#progress-bar Bar {
+    width: 1fr;
+}
+
+#progress-bar Bar > .bar--bar {
+    background: $panel-lighten-2;
+}
+
+#status-log {
+    height: 8;
+    border-top: tall $panel;
+    background: $surface;
+    padding: 0 1;
+}
+
+* {
+    scrollbar-background: $panel;
+    scrollbar-background-hover: $panel;
+    scrollbar-background-active: $panel;
+}
+
+/* ── Dialogs ─────────────────────────────────────────────────── */
+
+ModalScreen {
+    align: center middle;
+    background: $background 70%;
+}
+
+.dialog {
+    background: $panel;
+    border: thick $primary;
+    padding: 1 2;
+    width: 80%;
+    max-width: 100;
+    height: auto;
+    max-height: 90%;
+}
+
+.dialog-title {
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+.dialog-buttons {
+    height: auto;
+    align-horizontal: right;
+    margin-top: 1;
+}
+
+.dialog-buttons Button {
+    margin-left: 1;
+}
+
+.section-title {
+    text-style: bold;
+    color: $secondary;
+    margin-top: 1;
+}
+
+.muted {
+    color: $text-muted;
+}
+
+#help-dialog {
+    height: 90%;
+}
+
+#help-dialog > VerticalScroll {
+    height: 1fr;
+}
+
+#help-close {
+    dock: bottom;
+}
+
+#settings-body {
+    height: auto;
+    max-height: 30;
+}
+
+#settings-dialog .field-error {
+    display: block;
+}
+
+.switch-row {
+    height: auto;
+    margin-top: 1;
+}
+
+.switch-row Label {
+    margin-top: 1;
+}
+
+.provider-fields {
+    height: auto;
+}
+
+#confirm-dialog {
+    width: 60;
+}
+
+#dir-dialog {
+    height: 80%;
+}
+
+#dir-path-row {
+    height: auto;
+}
+
+#dir-path {
+    width: 1fr;
+}
+
+#dir-tree {
+    height: 1fr;
+    margin-top: 1;
+}

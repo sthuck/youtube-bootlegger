@@ -54,15 +54,20 @@ class TestFfmpegCommandResolution:
         splitter = AudioSplitter(settings=make_settings(ffmpeg_path="/opt/custom/ffmpeg"))
         captured_cmd = {}
 
-        class FakeResult:
+        class FakePopen:
+            pid = 0
             returncode = 0
-            stderr = ""
 
-        def fake_run(cmd, **kwargs):
-            captured_cmd["cmd"] = cmd
-            return FakeResult()
+            def __init__(self, cmd, **kwargs):
+                captured_cmd["cmd"] = cmd
 
-        monkeypatch.setattr("src.youtube_bootlegger.core.splitter.subprocess.run", fake_run)
+            def communicate(self, timeout=None):
+                return "", ""
+
+            def poll(self):
+                return self.returncode
+
+        monkeypatch.setattr("src.youtube_bootlegger.core.cancellation.subprocess.Popen", FakePopen)
 
         track = Track(name="Song", start_seconds=0, end_seconds=None)
         splitter._run_ffmpeg(tmp_path / "in.mp3", tmp_path / "out.mp3", track)

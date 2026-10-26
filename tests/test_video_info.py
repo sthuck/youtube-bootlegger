@@ -7,6 +7,8 @@ from src.youtube_bootlegger.core.settings import AppSettings
 from src.youtube_bootlegger.core.video_info import (
     _build_video_info,
     _fetch_video_info_external,
+    resolve_thumbnail,
+    thumbnail_candidates,
 )
 
 
@@ -116,3 +118,85 @@ class TestFetchVideoInfoExternal:
             _fetch_video_info_external("https://youtu.be/xyz", settings)
 
         assert "unavailable" in str(exc_info.value).lower()
+
+
+ZOO_ID = "jNQXAC9IVRw"
+
+
+def yt_thumbnails(video_id):
+    """Subset of what yt-dlp reports: guessed URLs (no width) plus sized ones."""
+    base = f"https://i.ytimg.com/vi/{video_id}"
+    webp = f"https://i.ytimg.com/vi_webp/{video_id}"
+    return [
+        {"url": f"{base}/default.jpg", "preference": -13},
+        {"url": f"{base}/hqdefault.jpg?sqp=x", "preference": -7, "width": 480},
+        {"url": f"{webp}/hqdefault.webp", "preference": -6},
+        {"url": f"{base}/sddefault.jpg", "preference": -5},
+        {"url": f"{base}/hq720.jpg", "preference": -3},
+        {"url": f"{base}/maxresdefault.jpg", "preference": -1},
+        {"url": f"{webp}/maxresdefault.webp", "preference": 0},
+    ]
+
+
+class TestThumbnailCandidates:
+    def test_prefers_jpeg_largest_first(self):
+        candidates = thumbnail_candidates(yt_thumbnails(ZOO_ID), ZOO_ID)
+        assert candidates[0] == f"https://i.ytimg.com/vi/{ZOO_ID}/maxresdefault.jpg"
+        assert candidates[1] == f"https://i.ytimg.com/vi/{ZOO_ID}/hq720.jpg"
+        assert not any(".webp" in url for url in candidates)
+
+    def test_always_ends_with_guaranteed_hqdefault(self):
+        candidates = thumbnail_candidates(yt_thumbnails(ZOO_ID), ZOO_ID)
+        assert candidates[-1] == f"https://i.ytimg.com/vi/{ZOO_ID}/hqdefault.jpg"
+        assert len(candidates) == len(set(candidates))
+
+    def test_no_thumbnails_still_gives_fallback(self):
+        assert thumbnail_candidates([], "abc") == ["https://i.ytimg.com/vi/abc/hqdefault.jpg"]
+
+    def test_no_thumbnails_and_no_id(self):
+        assert thumbnail_candidates([], "") == []
+
+    def test_webp_used_when_no_jpeg(self):
+        thumbs = [{"url": "https://example.com/a.webp", "preference": 0}]
+        assert thumbnail_candidates(thumbs, "")[0] == "https://example.com/a.webp"
+
+    def test_build_video_info_uses_top_candidate_and_keeps_list(self):
+        info = _build_video_info({"id": ZOO_ID, "thumbnails": yt_thumbnails(ZOO_ID)})
+        assert info.thumbnail_url == f"https://i.ytimg.com/vi/{ZOO_ID}/maxresdefault.jpg"
+        assert info.thumbnail_candidates[-1].endswith("/hqdefault.jpg")
+
+
+class TestResolveThumbnail:
+    def test_picks_first_reachable_candidate(self):
+        info = _build_video_info({"id": ZOO_ID, "thumbnails": yt_thumbnails(ZOO_ID)})
+        checked = []
+
+        def exists(url):
+            checked.append(url)
+            return url.endswith("/hqdefault.jpg")  # Old SD video: only hqdefault exists.
+
+        resolved = resolve_thumbnail(info, url_exists=exists)
+        assert resolved.thumbnail_url == f"https://i.ytimg.com/vi/{ZOO_ID}/hqdefault.jpg"
+        assert checked[0].endswith("/maxresdefault.jpg")
+
+    def test_keeps_best_when_it_exists(self):
+        info = _build_video_info({"id": "x", "thumbnails": yt_thumbnails("x")})
+        resolved = resolve_thumbnail(info, url_exists=lambda url: True)
+        assert resolved.thumbnail_url.endswith("/maxresdefault.jpg")
+
+    def test_unchanged_when_nothing_reachable(self):
+        info = _build_video_info({"id": "x", "thumbnails": yt_thumbnails("x")})
+        assert resolve_thumbnail(info, url_exists=lambda url: False) == info
+
+    def test_fetch_video_info_resolves_thumbnail(self, monkeypatch):
+        import src.youtube_bootlegger.core.video_info as vi
+
+        settings = AppSettings(FakeSettingsBackend())
+        monkeypatch.setattr(
+            vi,
+            "_fetch_video_info_library",
+            lambda url: _build_video_info({"id": ZOO_ID, "thumbnails": yt_thumbnails(ZOO_ID)}),
+        )
+        monkeypatch.setattr(vi, "_url_exists", lambda url: url.endswith("/hqdefault.jpg"))
+        info = vi.fetch_video_info("https://youtu.be/" + ZOO_ID, settings)
+        assert info.thumbnail_url == f"https://i.ytimg.com/vi/{ZOO_ID}/hqdefault.jpg"
