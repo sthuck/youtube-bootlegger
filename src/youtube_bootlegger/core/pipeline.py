@@ -96,6 +96,8 @@ class DownloadSplitPipeline:
             # Apply metadata tags
             self._emit_progress("tagging", 0, "Applying metadata tags...")
             self._apply_tags(output_files, job)
+            # Tagging includes a cover-art download that can take seconds.
+            self._cancel.raise_if_cancelled()
 
             self._emit_progress("complete", 100, "Complete!")
             return output_files

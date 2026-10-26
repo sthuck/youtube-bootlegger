@@ -63,9 +63,10 @@ class FakePipeline:
     outcome: object = None  # list of paths, or an exception to raise
     gate: threading.Event | None = None
 
-    def __init__(self, progress_callback=None, log_callback=None):
+    def __init__(self, progress_callback=None, log_callback=None, settings=None):
         self.progress_callback = progress_callback
         self.log_callback = log_callback
+        self.settings = settings
         self.cancelled = False
         self.job = None
         FakePipeline.instances.append(self)
@@ -232,6 +233,8 @@ class TestPipeline:
             assert [t.name for t in job.tracks] == ["Intro", "Song"]
             assert static_text(app, "#progress-stage") == "Complete!"
             assert app.query_one("#start", Button).disabled is False
+            # Review finding #8: the pipeline must use the app's settings.
+            assert fake_pipeline.instances[0].settings is settings
 
     async def test_pipeline_error_reported(self, settings, fake_video, fake_pipeline):
         fake_pipeline.outcome = DownloadError("network down")

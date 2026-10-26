@@ -325,6 +325,7 @@ class BootleggerApp(App[None]):
         self._pipeline = DownloadSplitPipeline(
             progress_callback=lambda *args: self._post(self._on_progress, *args),
             log_callback=lambda msg: self._post(self._log, msg, "debug"),
+            settings=self._settings,
         )
         self._in_background(self._execute_pipeline, self._pipeline, job)
 

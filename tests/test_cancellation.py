@@ -1,5 +1,6 @@
 """Tests for mid-operation cancellation of downloads and splits."""
 
+import subprocess
 import sys
 import threading
 import time
@@ -67,6 +68,7 @@ time.sleep(60)
 """
 
 FAST_FFMPEG = """
+import subprocess
 import sys
 if "-version" in sys.argv:
     print("ffmpeg version fake"); sys.exit(0)
@@ -268,3 +270,90 @@ class TestPipelineCancellation:
         pipeline = DownloadSplitPipeline(settings=make_settings())
         pipeline.cancel()
         assert pipeline.execute(self.make_job(tmp_path)) == []
+
+
+class TestChildProcessesDoNotReadTerminal:
+    """Children must not share the TUI's terminal input (review finding #1)."""
+
+    def test_child_stdin_is_closed_by_default(self):
+        token = CancelToken()
+        with token.child_process(
+            [sys.executable, "-c", "import sys; print(repr(sys.stdin.read()))"],
+            stdout=subprocess.PIPE,
+            text=True,
+        ) as proc:
+            out, _ = proc.communicate(timeout=FAST_SECONDS)
+        assert out.strip() == "''"
+
+    def test_ffmpeg_runs_with_nostdin(self, tmp_path):
+        args_file = tmp_path / "args.txt"
+        ffmpeg = write_script(
+            tmp_path / "ffmpeg",
+            "import sys\n"
+            "if '-version' in sys.argv: sys.exit(0)\n"
+            f"open({str(args_file)!r}, 'w').write(' '.join(sys.argv[1:]))\n"
+            "open(sys.argv[-1], 'wb').write(b'mp3')\n",
+        )
+        source = tmp_path / "in.mp3"
+        source.write_bytes(b"audio")
+        AudioSplitter(settings=make_settings(ffmpeg_path=str(ffmpeg))).split(
+            source, tmp_path / "out", [Track("One", 0)]
+        )
+        assert "-nostdin" in args_file.read_text().split()
+
+
+class TestCancelDoesNotDeleteUnwrittenFiles:
+    """Review finding #7: only files this run started writing may be removed."""
+
+    def test_existing_file_kept_when_cancel_lands_before_ffmpeg_starts(self, tmp_path):
+        ffmpeg = write_script(tmp_path / "ffmpeg", FAST_FFMPEG)
+        source = tmp_path / "in.mp3"
+        source.write_bytes(b"audio")
+        out = tmp_path / "out"
+        out.mkdir()
+        previous = out / "02 - Two.mp3"
+        previous.write_bytes(b"from an earlier run")
+        token = CancelToken()
+
+        def on_progress(current, total, name):
+            if current == 2:  # After the loop's check, before ffmpeg starts.
+                token.cancel()
+
+        splitter = AudioSplitter(
+            settings=make_settings(ffmpeg_path=str(ffmpeg)),
+            cancel_token=token,
+            progress_callback=on_progress,
+        )
+        with pytest.raises(OperationCancelledError):
+            splitter.split(source, out, [Track("One", 0, 10), Track("Two", 10)])
+        assert previous.read_bytes() == b"from an earlier run"
+        assert not (out / "01 - One.mp3").exists()
+
+
+class TestCancelDuringTagging:
+    """Review finding #4: cancel during cover-art download/tagging is honoured."""
+
+    def test_cancel_while_tagging_returns_empty_and_removes_files(self, tmp_path, monkeypatch):
+        ffmpeg = write_script(tmp_path / "ffmpeg", FAST_FFMPEG)
+        settings = make_settings(ffmpeg_path=str(ffmpeg))
+        source = tmp_path / "downloaded.mp3"
+
+        def fake_download(self, url):
+            source.write_bytes(b"audio")
+            return source
+
+        monkeypatch.setattr(AudioDownloader, "download", fake_download)
+        pipeline = DownloadSplitPipeline(settings=settings)
+        monkeypatch.setattr(
+            "src.youtube_bootlegger.core.pipeline.tag_audio_files",
+            lambda **kwargs: pipeline.cancel(),
+        )
+        job = DownloadJob(
+            url="https://youtu.be/x",
+            output_dir=tmp_path / "music",
+            tracks=(Track("One", 0, 10), Track("Two", 10)),
+            artist="Band",
+            album="Album",
+        )
+        assert pipeline.execute(job) == []
+        assert not (tmp_path / "music").exists() or not any((tmp_path / "music").rglob("*"))

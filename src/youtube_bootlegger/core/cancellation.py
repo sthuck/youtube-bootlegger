@@ -50,10 +50,12 @@ class CancelToken:
     def cancel(self) -> None:
         """Request cancellation and terminate the running child process, if any."""
         self._event.set()
-        # Signal under the lock so the process can't be reaped in between
-        # (child_process clears _process under the same lock before reaping).
+        # The lock keeps child_process from unregistering (and finally
+        # reaping) the process mid-signal. Callers may still reap it inside
+        # their with-block, so re-check with poll(): a reaped pid could
+        # belong to an unrelated process by now.
         with self._lock:
-            if self._process is not None and self._process.returncode is None:
+            if self._process is not None and self._process.poll() is None:
                 _signal_process_tree(self._process, signal.SIGTERM)
 
     def raise_if_cancelled(self) -> None:
@@ -73,6 +75,9 @@ class CancelToken:
             OperationCancelledError: If already cancelled before starting.
         """
         self.raise_if_cancelled()
+        # Never inherit the terminal as stdin: in the TUI, ffmpeg would read
+        # the user's keystrokes (e.g. "q" quietly ends an encode early).
+        popen_kwargs.setdefault("stdin", subprocess.DEVNULL)
         process = subprocess.Popen(cmd, start_new_session=_IS_POSIX, **popen_kwargs)
         with self._lock:
             self._process = process

@@ -79,8 +79,7 @@ class AudioSplitter:
 
                 safe_name = sanitize_filename(track.name)
                 output_file = output_dir / f"{i:02d} - {safe_name}.{audio_format}"
-                output_files.append(output_file)
-                self._run_ffmpeg(input_file, output_file, track)
+                self._run_ffmpeg(input_file, output_file, track, written=output_files)
         except OperationCancelledError:
             self._remove_files(output_files)
             raise
@@ -117,12 +116,21 @@ class AudioSplitter:
         input_file: Path,
         output_file: Path,
         track: Track,
+        written: list[Path] | None = None,
     ) -> None:
-        """Execute single FFmpeg split command."""
+        """Execute single FFmpeg split command.
+
+        Args:
+            written: Gets output_file appended once ffmpeg has started (and so
+                may have overwritten it). Cancel cleanup only deletes these,
+                never a same-named file from an earlier run that ffmpeg
+                didn't get to touch.
+        """
         start_time = format_seconds_to_timestamp(track.start_seconds)
 
         cmd = [
             self._ffmpeg_command,
+            "-nostdin",
             "-y",
             "-i",
             str(input_file),
@@ -151,6 +159,8 @@ class AudioSplitter:
                 stderr=subprocess.PIPE,
                 text=True,
             ) as process:
+                if written is not None:
+                    written.append(output_file)
                 _, stderr = process.communicate(timeout=300)
         except subprocess.TimeoutExpired as e:
             raise SplitError(f"FFmpeg timed out for '{track.name}'") from e
