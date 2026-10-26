@@ -7,30 +7,36 @@ requires-python = ">=3.12"
 dependencies = [
     "litellm>=1.80.0",
     "mutagen>=1.47.0",
+    "pillow>=12.3.0",
     "pydantic>=2.0.0",
     "pyside6>=6.10.2",
+    "textual>=8.2.8",
+    "textual-image>=0.14.2",
     "yt-dlp[default]>=2026.10.21",
 ]
 
 [project.scripts]
 youtube-bootlegger = "youtube_bootlegger.app:run"
+youtube-bootlegger-tui = "youtube_bootlegger.app_tui:run"
 
 [dependency-groups]
 dev = [
     "imageio>=2.37.3",
     "nuitka>=4.0.1",
-    "pillow>=12.3.0",
     "pip>=26.0.1",
     "pyinstaller>=6.19.0",
     "pytest>=8.0.0",
+    "pytest-asyncio>=1.4.1",
 ]
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-youtube_bootlegger = ["assets/*.png", "assets/*.svg", "qml/*.qml"]
+youtube_bootlegger = ["assets/*.png", "assets/*.svg", "qml/*.qml", "tui/*.tcss"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
