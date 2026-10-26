@@ -10,12 +10,17 @@ from src.youtube_bootlegger.llm import (
     DEFAULT_VERTEX_MODEL,
     LlmExtractionError,
     TracklistExtraction,
-    build_litellm_kwargs,
+    build_chat_request,
     extract_tracklist_metadata,
     is_llm_configured,
     parse_extraction_response,
-    resolve_litellm_model,
+    resolve_model,
     validate_extraction,
+)
+from src.youtube_bootlegger.llm.llm_api import (
+    ANTHROPIC_MESSAGES_URL,
+    GEMINI_GENERATE_URL,
+    OPENAI_CHAT_URL,
 )
 from src.youtube_bootlegger.core.settings import AppSettings, LlmProvider
 
@@ -77,52 +82,117 @@ class TestIsLlmConfigured:
         assert is_llm_configured(settings) is True
 
 
-class TestResolveLitellmModel:
+class TestResolveModel:
     def test_openai_default_model(self):
         settings = make_settings(llm_provider=LlmProvider.OPENAI)
-        assert resolve_litellm_model(settings) == DEFAULT_OPENAI_MODEL
+        assert resolve_model(settings) == DEFAULT_OPENAI_MODEL
 
-    def test_anthropic_prefixes_model(self):
+    def test_anthropic_uses_bare_model_id(self):
         settings = make_settings(
             llm_provider=LlmProvider.ANTHROPIC,
-            anthropic_model="claude-sonnet-5",
+            anthropic_model="anthropic/claude-sonnet-5",
         )
-        assert resolve_litellm_model(settings) == "anthropic/claude-sonnet-5"
+        assert resolve_model(settings) == "claude-sonnet-5"
 
-    def test_vertex_uses_gemini_prefix_for_api_key_auth(self):
+    def test_vertex_uses_bare_gemini_model(self):
         settings = make_settings(llm_provider=LlmProvider.VERTEX)
-        assert resolve_litellm_model(settings) == f"gemini/{DEFAULT_VERTEX_MODEL}"
+        assert resolve_model(settings) == DEFAULT_VERTEX_MODEL
 
-    def test_vertex_converts_legacy_vertex_ai_prefix(self):
+    def test_vertex_strips_legacy_prefixes(self):
         settings = make_settings(
             llm_provider=LlmProvider.VERTEX,
             vertex_model="vertex_ai/gemini-2.0-flash",
         )
-        assert resolve_litellm_model(settings) == "gemini/gemini-2.0-flash"
+        assert resolve_model(settings) == "gemini-2.0-flash"
 
 
-class TestBuildLitellmKwargs:
-    def test_openai_kwargs(self):
+def _extraction_json() -> str:
+    return json.dumps(
+        {
+            "template": "[%mm%:%ss%] %songname%",
+            "artist_name": "The Band",
+            "album_name": "Live at Madison Square Garden",
+        }
+    )
+
+
+class TestBuildChatRequest:
+    def test_openai_request(self):
         settings = make_settings(
             llm_provider=LlmProvider.OPENAI,
             openai_api_key="sk-test",
             openai_model=DEFAULT_OPENAI_MODEL,
         )
-        kwargs = build_litellm_kwargs(settings)
-        assert kwargs["model"] == DEFAULT_OPENAI_MODEL
-        assert kwargs["api_key"] == "sk-test"
+        request = build_chat_request(settings, "system", "user")
+        assert request.url == OPENAI_CHAT_URL
+        assert request.headers["Authorization"] == "Bearer sk-test"
+        assert request.body["model"] == DEFAULT_OPENAI_MODEL
+        assert request.body["max_completion_tokens"] == 4096
+        assert "max_tokens" not in request.body
+        assert request.body["messages"][0] == {"role": "system", "content": "system"}
+        schema = request.body["response_format"]["json_schema"]
+        assert schema["name"] == "tracklist_extraction"
+        assert schema["strict"] is True
+        assert schema["schema"]["additionalProperties"] is False
+        assert set(schema["schema"]["required"]) == {
+            "template",
+            "artist_name",
+            "album_name",
+        }
 
-    def test_compatible_kwargs_include_base_url(self):
+    def test_anthropic_request(self):
+        settings = make_settings(
+            llm_provider=LlmProvider.ANTHROPIC,
+            anthropic_api_key="sk-ant",
+            anthropic_model=DEFAULT_ANTHROPIC_MODEL,
+        )
+        request = build_chat_request(settings, "system", "user")
+        assert request.url == ANTHROPIC_MESSAGES_URL
+        assert request.headers["x-api-key"] == "sk-ant"
+        assert request.headers["anthropic-version"] == "2023-06-01"
+        assert request.body["model"] == DEFAULT_ANTHROPIC_MODEL
+        assert request.body["system"] == "system"
+        assert request.body["messages"] == [{"role": "user", "content": "user"}]
+        assert request.body["output_config"]["format"]["type"] == "json_schema"
+        assert request.body["max_tokens"] == 4096
+
+    def test_gemini_request(self):
+        settings = make_settings(
+            llm_provider=LlmProvider.VERTEX,
+            vertex_api_key="gemini-key",
+            vertex_model="gemini/gemini-2.0-flash",
+        )
+        request = build_chat_request(settings, "system", "user")
+        assert request.url == GEMINI_GENERATE_URL.format(model="gemini-2.0-flash")
+        assert request.headers["x-goog-api-key"] == "gemini-key"
+        assert request.body["systemInstruction"]["parts"][0]["text"] == "system"
+        assert request.body["contents"][0]["parts"][0]["text"] == "user"
+        config = request.body["generationConfig"]
+        assert config["responseMimeType"] == "application/json"
+        assert config["responseJsonSchema"]["additionalProperties"] is False
+
+    def test_compatible_request_includes_base_url_and_max_tokens(self):
         settings = make_settings(
             llm_provider=LlmProvider.OPENAI_COMPATIBLE,
             compatible_base_url="https://example.com/v1/",
             compatible_bearer_token="token-123",
             compatible_model="local-model",
         )
-        kwargs = build_litellm_kwargs(settings)
-        assert kwargs["model"] == "local-model"
-        assert kwargs["api_base"] == "https://example.com/v1"
-        assert kwargs["api_key"] == "token-123"
+        request = build_chat_request(settings, "system", "user")
+        assert request.url == "https://example.com/v1/chat/completions"
+        assert request.headers["Authorization"] == "Bearer token-123"
+        assert request.body["model"] == "local-model"
+        assert request.body["max_tokens"] == 4096
+        assert "max_completion_tokens" not in request.body
+
+    def test_compatible_request_omits_auth_without_token(self):
+        settings = make_settings(
+            llm_provider=LlmProvider.OPENAI_COMPATIBLE,
+            compatible_base_url="https://example.com/v1/chat/completions",
+        )
+        request = build_chat_request(settings, "system", "user")
+        assert request.url == "https://example.com/v1/chat/completions"
+        assert "Authorization" not in request.headers
 
 
 class TestParseExtractionResponse:
@@ -162,6 +232,17 @@ class TestParseExtractionResponse:
         )
         with pytest.raises(LlmExtractionError, match="empty template"):
             parse_extraction_response(payload)
+
+    def test_parses_markdown_fenced_json(self):
+        payload = "```json\n" + json.dumps(
+            {
+                "template": "%songname% - %mm%:%ss%",
+                "artist_name": "Phish",
+                "album_name": "NYE 2023",
+            }
+        ) + "\n```"
+        result = parse_extraction_response(payload)
+        assert result.artist_name == "Phish"
 
 
 class TestValidateExtraction:
@@ -226,49 +307,62 @@ class TestExtractTracklistMetadata:
         with pytest.raises(LlmExtractionError, match="Video title is required"):
             extract_tracklist_metadata(settings, "   ", "Song - 0:00")
 
-    def test_calls_completion_fn_and_parses_response(self):
+    def test_calls_provider_and_parses_response(self):
         settings = make_settings(
             llm_provider=LlmProvider.OPENAI,
             openai_api_key="sk-test",
             openai_model=DEFAULT_OPENAI_MODEL,
         )
-
-        class FakeChoice:
-            def __init__(self, content):
-                self.message = type("Message", (), {"content": content})()
-
-        class FakeResponse:
-            def __init__(self, content):
-                self.choices = [FakeChoice(content)]
-
         captured = {}
 
-        def fake_completion(**kwargs):
-            captured.update(kwargs)
-            content = json.dumps(
-                {
-                    "template": "[%mm%:%ss%] %songname%",
-                    "artist_name": "The Band",
-                    "album_name": "Live at Madison Square Garden",
-                }
-            )
-            return FakeResponse(content)
+        def fake_post(url, headers, body):
+            captured["url"] = url
+            captured["headers"] = dict(headers)
+            captured["body"] = body
+            return {"choices": [{"message": {"content": _extraction_json()}}]}
 
         result = extract_tracklist_metadata(
             settings,
             "The Band Live at Madison Square Garden",
             "[0:00] Opener\n[5:00] Closer",
-            completion_fn=fake_completion,
+            post_json=fake_post,
         )
 
         assert isinstance(result, TracklistExtraction)
         assert result.template == "[%mm%:%ss%] %songname%"
         assert result.artist_name == "The Band"
         assert result.album_name == "Live at Madison Square Garden"
-        assert captured["model"] == DEFAULT_OPENAI_MODEL
-        assert captured["api_key"] == "sk-test"
-        assert captured["response_format"] is TracklistExtraction
-        assert captured["messages"][1]["content"].startswith("YouTube Bootlegger")
+        assert captured["url"] == OPENAI_CHAT_URL
+        assert captured["headers"]["Authorization"] == "Bearer sk-test"
+        assert captured["body"]["model"] == DEFAULT_OPENAI_MODEL
+        assert captured["body"]["messages"][1]["content"].startswith("YouTube Bootlegger")
+
+    def test_parses_anthropic_and_gemini_envelopes(self):
+        content = _extraction_json()
+        cases = [
+            (
+                make_settings(
+                    llm_provider=LlmProvider.ANTHROPIC,
+                    anthropic_api_key="key",
+                ),
+                {"content": [{"type": "text", "text": content}]},
+            ),
+            (
+                make_settings(
+                    llm_provider=LlmProvider.VERTEX,
+                    vertex_api_key="key",
+                ),
+                {"candidates": [{"content": {"parts": [{"text": content}]}}]},
+            ),
+        ]
+        for settings, envelope in cases:
+            result = extract_tracklist_metadata(
+                settings,
+                "The Band Live",
+                "[0:00] Opener\n[5:00] Closer",
+                post_json=lambda _url, _headers, _body, envelope=envelope: envelope,
+            )
+            assert result.template == "[%mm%:%ss%] %songname%"
 
     def test_rejects_llm_template_that_does_not_parse_tracklist(self):
         settings = make_settings(
@@ -276,15 +370,7 @@ class TestExtractTracklistMetadata:
             openai_api_key="sk-test",
         )
 
-        class FakeChoice:
-            def __init__(self, content):
-                self.message = type("Message", (), {"content": content})()
-
-        class FakeResponse:
-            def __init__(self, content):
-                self.choices = [FakeChoice(content)]
-
-        def fake_completion(**_kwargs):
+        def fake_post(_url, _headers, _body):
             content = json.dumps(
                 {
                     "template": "%songname% - %mm%:%ss%",
@@ -292,23 +378,23 @@ class TestExtractTracklistMetadata:
                     "album_name": "Live",
                 }
             )
-            return FakeResponse(content)
+            return {"choices": [{"message": {"content": content}}]}
 
         with pytest.raises(LlmExtractionError, match="does not match the track list"):
             extract_tracklist_metadata(
                 settings,
                 "Show",
                 "[0:00] Opener\n[5:00] Closer",
-                completion_fn=fake_completion,
+                post_json=fake_post,
             )
 
-    def test_wraps_completion_errors(self):
+    def test_wraps_transport_errors(self):
         settings = make_settings(
             llm_provider=LlmProvider.ANTHROPIC,
             anthropic_api_key="key",
         )
 
-        def failing_completion(**_kwargs):
+        def failing_post(_url, _headers, _body):
             raise RuntimeError("network down")
 
         with pytest.raises(LlmExtractionError, match="LLM request failed"):
@@ -316,5 +402,22 @@ class TestExtractTracklistMetadata:
                 settings,
                 "Show",
                 "Song - 0:00",
-                completion_fn=failing_completion,
+                post_json=failing_post,
+            )
+
+    def test_surfaces_provider_error_payload(self):
+        settings = make_settings(
+            llm_provider=LlmProvider.OPENAI,
+            openai_api_key="sk-test",
+        )
+
+        def fake_post(_url, _headers, _body):
+            return {"error": {"message": "invalid api key"}}
+
+        with pytest.raises(LlmExtractionError, match="invalid api key"):
+            extract_tracklist_metadata(
+                settings,
+                "Show",
+                "Song - 0:00",
+                post_json=fake_post,
             )

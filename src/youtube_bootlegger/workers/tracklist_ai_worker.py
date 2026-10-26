@@ -23,13 +23,13 @@ class TracklistAiWorker(QRunnable):
         video_title: str,
         raw_tracklist: str,
         *,
-        completion_fn=None,
+        post_json=None,
     ):
         super().__init__()
         self._settings = settings
         self._video_title = video_title
         self._raw_tracklist = raw_tracklist
-        self._completion_fn = completion_fn
+        self._post_json = post_json
         self.signals = TracklistAiSignals()
 
     def run(self) -> None:
@@ -40,7 +40,7 @@ class TracklistAiWorker(QRunnable):
                 self._settings,
                 self._video_title,
                 self._raw_tracklist,
-                completion_fn=self._completion_fn,
+                post_json=self._post_json,
             )
             self.signals.finished.emit(result)
         except LlmExtractionError as exc:

@@ -1,8 +1,13 @@
-"""LLM API integration via litellm for tracklist extraction."""
+"""Direct provider HTTP calls for tracklist extraction."""
 
 from __future__ import annotations
 
 import json
+import urllib.error
+import urllib.parse
+import urllib.request
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError
@@ -16,6 +21,17 @@ DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-5"
 DEFAULT_VERTEX_MODEL = "gemini-2.0-flash"
 DEFAULT_COMPATIBLE_MODEL = "gpt-4o-mini"
 
+OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions"
+ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages"
+GEMINI_GENERATE_URL = (
+    "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+)
+ANTHROPIC_VERSION = "2023-06-01"
+MAX_OUTPUT_TOKENS = 4096
+REQUEST_TIMEOUT_SECONDS = 120
+
+PostJson = Callable[[str, Mapping[str, str], Mapping[str, Any]], Mapping[str, Any]]
+
 
 class TracklistExtraction(BaseModel):
     """Structured LLM response for tracklist analysis."""
@@ -27,6 +43,16 @@ class TracklistExtraction(BaseModel):
 
 class LlmExtractionError(Exception):
     """Raised when LLM extraction fails."""
+
+
+@dataclass(frozen=True)
+class ChatRequest:
+    """One JSON POST against a provider chat endpoint."""
+
+    url: str
+    headers: dict[str, str]
+    body: dict[str, Any]
+    provider: LlmProvider
 
 
 def is_llm_configured(settings: AppSettings) -> bool:
@@ -47,49 +73,147 @@ def is_llm_configured(settings: AppSettings) -> bool:
     return False
 
 
-def _resolve_gemini_model(model: str) -> str:
-    """Return a litellm model id for Google AI Studio (API key) Gemini models."""
-    resolved = model or DEFAULT_VERTEX_MODEL
-    if resolved.startswith("gemini/"):
-        return resolved
-    if resolved.startswith("vertex_ai/"):
-        resolved = resolved.split("/", 1)[1]
-    return f"gemini/{resolved}"
-
-
-def resolve_litellm_model(settings: AppSettings) -> str:
-    """Return the litellm model identifier for the active provider."""
+def resolve_model(settings: AppSettings) -> str:
+    """Return the provider-native model id for the active provider."""
     provider = settings.llm_provider
     if provider == LlmProvider.OPENAI:
         return settings.openai_model or DEFAULT_OPENAI_MODEL
     if provider == LlmProvider.ANTHROPIC:
-        model = settings.anthropic_model or DEFAULT_ANTHROPIC_MODEL
-        return model if model.startswith("anthropic/") else f"anthropic/{model}"
+        return _strip_known_prefix(
+            settings.anthropic_model or DEFAULT_ANTHROPIC_MODEL,
+            "anthropic/",
+        )
     if provider == LlmProvider.VERTEX:
-        return _resolve_gemini_model(settings.vertex_model)
+        return _strip_known_prefix(
+            settings.vertex_model or DEFAULT_VERTEX_MODEL,
+            "gemini/",
+            "vertex_ai/",
+            "models/",
+        )
     return settings.compatible_model or DEFAULT_COMPATIBLE_MODEL
 
 
-def build_litellm_kwargs(settings: AppSettings) -> dict[str, Any]:
-    """Build keyword arguments for litellm.completion from app settings."""
+def extraction_json_schema() -> dict[str, Any]:
+    """Return a strict object schema for TracklistExtraction."""
+    schema = TracklistExtraction.model_json_schema()
+    schema.pop("$schema", None)
+    schema.pop("title", None)
+    schema.pop("description", None)
+    properties = schema.get("properties")
+    if isinstance(properties, dict):
+        schema["required"] = list(properties)
+        for prop in properties.values():
+            if isinstance(prop, dict):
+                prop.pop("title", None)
+    schema["additionalProperties"] = False
+    return schema
+
+
+def build_chat_request(settings: AppSettings, system: str, user: str) -> ChatRequest:
+    """Build the URL, auth headers, and JSON body for the active provider."""
     provider = settings.llm_provider
-    kwargs: dict[str, Any] = {"model": resolve_litellm_model(settings)}
+    model = resolve_model(settings)
+    schema = extraction_json_schema()
 
     if provider == LlmProvider.OPENAI:
-        kwargs["api_key"] = settings.openai_api_key.strip()
-    elif provider == LlmProvider.ANTHROPIC:
-        kwargs["api_key"] = settings.anthropic_api_key.strip()
-    elif provider == LlmProvider.VERTEX:
-        kwargs["api_key"] = settings.vertex_api_key.strip()
-    elif provider == LlmProvider.OPENAI_COMPATIBLE:
-        kwargs["api_base"] = settings.compatible_base_url.strip().rstrip("/")
+        return ChatRequest(
+            url=OPENAI_CHAT_URL,
+            headers=_bearer_headers(settings.openai_api_key),
+            body=_openai_chat_body(
+                model,
+                system,
+                user,
+                schema,
+                token_field="max_completion_tokens",
+            ),
+            provider=provider,
+        )
+    if provider == LlmProvider.ANTHROPIC:
+        headers = _json_headers()
+        headers["x-api-key"] = settings.anthropic_api_key.strip()
+        headers["anthropic-version"] = ANTHROPIC_VERSION
+        return ChatRequest(
+            url=ANTHROPIC_MESSAGES_URL,
+            headers=headers,
+            body={
+                "model": model,
+                "max_tokens": MAX_OUTPUT_TOKENS,
+                "system": system,
+                "messages": [{"role": "user", "content": user}],
+                "output_config": {
+                    "format": {"type": "json_schema", "schema": schema},
+                },
+            },
+            provider=provider,
+        )
+    if provider == LlmProvider.VERTEX:
+        headers = _json_headers()
+        headers["x-goog-api-key"] = settings.vertex_api_key.strip()
+        quoted_model = urllib.parse.quote(model, safe="")
+        return ChatRequest(
+            url=GEMINI_GENERATE_URL.format(model=quoted_model),
+            headers=headers,
+            body={
+                "systemInstruction": {"parts": [{"text": system}]},
+                "contents": [{"role": "user", "parts": [{"text": user}]}],
+                "generationConfig": {
+                    "responseMimeType": "application/json",
+                    "responseJsonSchema": schema,
+                    "maxOutputTokens": MAX_OUTPUT_TOKENS,
+                },
+            },
+            provider=provider,
+        )
+    if provider == LlmProvider.OPENAI_COMPATIBLE:
+        headers = _json_headers()
         token = settings.compatible_bearer_token.strip()
         if token:
-            kwargs["api_key"] = token
-    else:
-        raise LlmExtractionError("No LLM provider is configured")
+            headers["Authorization"] = f"Bearer {token}"
+        return ChatRequest(
+            url=_compatible_chat_url(settings.compatible_base_url),
+            headers=headers,
+            body=_openai_chat_body(model, system, user, schema, token_field="max_tokens"),
+            provider=provider,
+        )
+    raise LlmExtractionError("No LLM provider is configured")
 
-    return kwargs
+
+def post_json(
+    url: str,
+    headers: Mapping[str, str],
+    payload: Mapping[str, Any],
+    *,
+    timeout: float = REQUEST_TIMEOUT_SECONDS,
+) -> dict[str, Any]:
+    """POST a JSON body and return the decoded JSON object."""
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={str(key): str(value) for key, value in headers.items()},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            raw = response.read()
+    except urllib.error.HTTPError as exc:
+        detail = _error_message(exc.read())
+        message = f"LLM request failed: HTTP {exc.code}"
+        if detail:
+            message = f"{message}: {detail}"
+        raise LlmExtractionError(message) from exc
+    except urllib.error.URLError as exc:
+        raise LlmExtractionError(f"LLM request failed: {exc.reason}") from exc
+
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise LlmExtractionError("LLM returned an unexpected response shape") from exc
+    if not isinstance(parsed, dict):
+        raise LlmExtractionError("LLM returned an unexpected response shape")
+    return parsed
+
+
+_default_post_json = post_json
 
 
 def parse_extraction_response(content: str | dict[str, Any]) -> TracklistExtraction:
@@ -98,7 +222,7 @@ def parse_extraction_response(content: str | dict[str, Any]) -> TracklistExtract
         payload = content
     elif isinstance(content, str):
         try:
-            payload = json.loads(content)
+            payload = json.loads(_unwrap_json_text(content))
         except json.JSONDecodeError as exc:
             raise LlmExtractionError(f"LLM returned invalid JSON: {exc}") from exc
     else:
@@ -151,7 +275,7 @@ def extract_tracklist_metadata(
     video_title: str,
     raw_tracklist: str,
     *,
-    completion_fn=None,
+    post_json: PostJson | None = None,
 ) -> TracklistExtraction:
     """Call the configured LLM to extract template and metadata.
 
@@ -159,7 +283,7 @@ def extract_tracklist_metadata(
         settings: Application settings with LLM provider configuration.
         video_title: Title of the YouTube video.
         raw_tracklist: User-entered raw track list text.
-        completion_fn: Optional override for litellm.completion (for tests).
+        post_json: Optional override for the HTTP POST (for tests).
 
     Returns:
         Parsed extraction result.
@@ -180,34 +304,21 @@ def extract_tracklist_metadata(
             "Lite (ChatGPT) opens in your browser. Use the AI button instead of the API."
         )
 
-    if completion_fn is None:
-        from litellm import completion
-
-        completion_fn = completion
-
     prompt = build_extraction_prompt(video_title, raw_tracklist)
-    kwargs = build_litellm_kwargs(settings)
+    request = build_chat_request(settings, SYSTEM_PROMPT, prompt)
+    send = post_json if post_json is not None else _default_post_json
 
     try:
-        response = completion_fn(
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
-            ],
-            response_format=TracklistExtraction,
-            **kwargs,
-        )
+        body = send(request.url, request.headers, request.body)
+    except LlmExtractionError:
+        raise
     except Exception as exc:
         raise LlmExtractionError(f"LLM request failed: {exc}") from exc
 
-    try:
-        content = response.choices[0].message.content
-    except (AttributeError, IndexError, TypeError) as exc:
-        raise LlmExtractionError("LLM returned an unexpected response shape") from exc
+    if not isinstance(body, Mapping):
+        raise LlmExtractionError("LLM returned an unexpected response shape")
 
-    if content is None or content == "":
-        raise LlmExtractionError("LLM returned an empty response")
-
+    content = response_text(request.provider, body)
     extraction = parse_extraction_response(content)
     return validate_extraction(extraction, raw_tracklist)
 
@@ -215,3 +326,167 @@ def extract_tracklist_metadata(
 def fallback_template() -> str:
     """Return the default template when LLM output is unavailable."""
     return DEFAULT_TEMPLATE
+
+
+def response_text(provider: LlmProvider, body: Mapping[str, Any]) -> str:
+    """Pull the JSON text out of a provider response body."""
+    error = _embedded_error(body)
+    if error:
+        raise LlmExtractionError(f"LLM request failed: {error}")
+
+    if provider in (LlmProvider.OPENAI, LlmProvider.OPENAI_COMPATIBLE):
+        text = _openai_text(body)
+    elif provider == LlmProvider.ANTHROPIC:
+        text = _anthropic_text(body)
+    elif provider == LlmProvider.VERTEX:
+        text = _gemini_text(body)
+    else:
+        raise LlmExtractionError("LLM returned an unexpected response shape")
+
+    if text.strip() == "":
+        raise LlmExtractionError("LLM returned an empty response")
+    return text
+
+
+def _strip_known_prefix(model: str, *prefixes: str) -> str:
+    resolved = model.strip()
+    for prefix in prefixes:
+        if resolved.startswith(prefix):
+            return resolved[len(prefix) :]
+    return resolved
+
+
+def _json_headers() -> dict[str, str]:
+    return {"Content-Type": "application/json", "Accept": "application/json"}
+
+
+def _bearer_headers(api_key: str) -> dict[str, str]:
+    headers = _json_headers()
+    headers["Authorization"] = f"Bearer {api_key.strip()}"
+    return headers
+
+
+def _openai_chat_body(
+    model: str,
+    system: str,
+    user: str,
+    schema: dict[str, Any],
+    *,
+    token_field: str,
+) -> dict[str, Any]:
+    # OpenAI chat now expects max_completion_tokens. Most compatible servers still want max_tokens.
+    return {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "tracklist_extraction",
+                "strict": True,
+                "schema": schema,
+            },
+        },
+        token_field: MAX_OUTPUT_TOKENS,
+    }
+
+
+def _compatible_chat_url(base_url: str) -> str:
+    base = base_url.strip().rstrip("/")
+    if not base:
+        raise LlmExtractionError("LLM is not configured. Add API credentials in Settings.")
+    suffix = "/chat/completions"
+    if base.endswith(suffix):
+        return base
+    return f"{base}{suffix}"
+
+
+def _unwrap_json_text(content: str) -> str:
+    text = content.strip()
+    if not text.startswith("```"):
+        return text
+    newline = text.find("\n")
+    if newline == -1:
+        return text
+    body = text[newline + 1 :]
+    if body.rstrip().endswith("```"):
+        body = body.rstrip()[: -3]
+    return body.strip()
+
+
+def _error_message(raw: bytes) -> str:
+    if not raw:
+        return ""
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return raw.decode("utf-8", errors="replace").strip()
+    if isinstance(payload, dict):
+        message = _embedded_error(payload)
+        if message:
+            return message
+    text = raw.decode("utf-8", errors="replace").strip()
+    return text[:500]
+
+
+def _embedded_error(body: Mapping[str, Any]) -> str | None:
+    error = body.get("error")
+    if isinstance(error, str) and error.strip():
+        return error.strip()
+    if isinstance(error, dict):
+        message = error.get("message")
+        if isinstance(message, str) and message.strip():
+            return message.strip()
+    feedback = body.get("promptFeedback")
+    if isinstance(feedback, dict):
+        reason = feedback.get("blockReason")
+        if isinstance(reason, str) and reason.strip():
+            return f"blocked ({reason})"
+    return None
+
+
+def _openai_text(body: Mapping[str, Any]) -> str:
+    try:
+        message = body["choices"][0]["message"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise LlmExtractionError("LLM returned an unexpected response shape") from exc
+    if not isinstance(message, Mapping):
+        raise LlmExtractionError("LLM returned an unexpected response shape")
+    refusal = message.get("refusal")
+    if isinstance(refusal, str) and refusal.strip():
+        raise LlmExtractionError(f"LLM request failed: {refusal.strip()}")
+    content = message.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return _text_from_parts(content)
+    return ""
+
+
+def _anthropic_text(body: Mapping[str, Any]) -> str:
+    content = body.get("content")
+    if not isinstance(content, list):
+        raise LlmExtractionError("LLM returned an unexpected response shape")
+    return _text_from_parts(content)
+
+
+def _gemini_text(body: Mapping[str, Any]) -> str:
+    try:
+        parts = body["candidates"][0]["content"]["parts"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise LlmExtractionError("LLM returned an unexpected response shape") from exc
+    if not isinstance(parts, list):
+        raise LlmExtractionError("LLM returned an unexpected response shape")
+    return _text_from_parts(parts)
+
+
+def _text_from_parts(parts: list[Any]) -> str:
+    chunks: list[str] = []
+    for part in parts:
+        if isinstance(part, str):
+            chunks.append(part)
+        elif isinstance(part, Mapping) and isinstance(part.get("text"), str):
+            chunks.append(part["text"])
+    return "".join(chunks)
