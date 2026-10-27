@@ -24,7 +24,7 @@ class TracklistAiWorker(QRunnable):
         video_title: str,
         raw_tracklist: str,
         *,
-        http_post: PostJson = post_json,
+        http_post: PostJson | None = None,
     ):
         super().__init__()
         self._settings = settings
@@ -41,7 +41,7 @@ class TracklistAiWorker(QRunnable):
                 self._settings,
                 self._video_title,
                 self._raw_tracklist,
-                http_post=self._http_post,
+                http_post=self._http_post or post_json,
             )
             self.signals.finished.emit(result)
         except LlmExtractionError as exc:

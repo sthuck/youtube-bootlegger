@@ -65,6 +65,7 @@ Item {
                     }
 
                     MouseArea {
+                        objectName: "externalYtdlpToggle"
                         anchors.fill: parent
                         cursorShape: Qt.PointingHandCursor
                         onClicked: backend.setUseExternalYtdlp(!backend.useExternalYtdlp)
@@ -75,6 +76,7 @@ Item {
 
             /* ── yt-dlp path ── */
             ColumnLayout {
+                objectName: "ytdlpPathSection"
                 Layout.fillWidth: true
                 spacing: 4
                 enabled: backend.useExternalYtdlp
@@ -93,6 +95,7 @@ Item {
                         Behavior on border.color { ColorAnimation { duration: 150 } }
                         TextInput {
                             id: ytdlpPathField
+                            objectName: "ytdlpPathField"
                             anchors { fill: parent; leftMargin: 10; rightMargin: 10 }
                             verticalAlignment: Text.AlignVCenter
                             color: root.colors.text; font.pixelSize: 13; clip: true
@@ -137,6 +140,7 @@ Item {
                         Behavior on border.color { ColorAnimation { duration: 150 } }
                         TextInput {
                             id: ffmpegPathField
+                            objectName: "ffmpegPathField"
                             anchors { fill: parent; leftMargin: 10; rightMargin: 10 }
                             verticalAlignment: Text.AlignVCenter
                             color: root.colors.text; font.pixelSize: 13; clip: true
@@ -164,6 +168,7 @@ Item {
                 }
 
                 Text {
+                    objectName: "ffmpegMissingWarning"
                     text: backend.ffmpegMissing ? "FFmpeg not found at this location" : ""
                     color: root.colors.warning; font.pixelSize: 11
                     visible: backend.ffmpegMissing
@@ -198,28 +203,31 @@ Item {
                         { id: "openai_compatible", label: "OpenAI compatible" }
                     ]
                     delegate: Rectangle {
+                        id: providerDelegate
                         required property var modelData
                         Layout.fillWidth: true
                         height: 34
                         radius: root.colors.radiusSm
-                        color: backend.llmProvider === modelData.id ? root.colors.elevated : root.colors.inputBg
-                        border.color: backend.llmProvider === modelData.id ? root.colors.accent : root.colors.border
+                        color: backend.llmProvider === providerDelegate.modelData.id ? root.colors.elevated : root.colors.inputBg
+                        border.color: backend.llmProvider === providerDelegate.modelData.id ? root.colors.accent : root.colors.border
                         border.width: 1
                         Text {
                             anchors { left: parent.left; leftMargin: 12; verticalCenter: parent.verticalCenter }
-                            text: modelData.label
+                            text: providerDelegate.modelData.label
                             color: root.colors.text
                             font.pixelSize: 13
                         }
                         MouseArea {
+                            objectName: "provider_" + providerDelegate.modelData.id
                             anchors.fill: parent
                             cursorShape: Qt.PointingHandCursor
-                            onClicked: backend.setLlmProvider(modelData.id)
+                            onClicked: backend.setLlmProvider(providerDelegate.modelData.id)
                         }
                     }
                 }
 
                 ColumnLayout {
+                    objectName: "openaiSection"
                     Layout.fillWidth: true
                     spacing: 8
                     visible: backend.llmProvider === "openai"
@@ -233,6 +241,7 @@ Item {
                         border.width: openaiKeyField.activeFocus ? 2 : 1
                         TextInput {
                             id: openaiKeyField
+                            objectName: "openaiKeyField"
                             anchors { fill: parent; leftMargin: 10; rightMargin: 10 }
                             verticalAlignment: Text.AlignVCenter
                             color: root.colors.text; font.pixelSize: 13; clip: true
@@ -250,6 +259,7 @@ Item {
                         border.width: openaiModelField.activeFocus ? 2 : 1
                         TextInput {
                             id: openaiModelField
+                            objectName: "openaiModelField"
                             anchors { fill: parent; leftMargin: 10; rightMargin: 10 }
                             verticalAlignment: Text.AlignVCenter
                             color: root.colors.text; font.pixelSize: 13; clip: true
@@ -266,6 +276,7 @@ Item {
                 }
 
                 ColumnLayout {
+                    objectName: "anthropicSection"
                     Layout.fillWidth: true
                     spacing: 8
                     visible: backend.llmProvider === "anthropic"
@@ -279,6 +290,7 @@ Item {
                         border.width: anthropicKeyField.activeFocus ? 2 : 1
                         TextInput {
                             id: anthropicKeyField
+                            objectName: "anthropicKeyField"
                             anchors { fill: parent; leftMargin: 10; rightMargin: 10 }
                             verticalAlignment: Text.AlignVCenter
                             color: root.colors.text; font.pixelSize: 13; clip: true
@@ -296,6 +308,7 @@ Item {
                         border.width: anthropicModelField.activeFocus ? 2 : 1
                         TextInput {
                             id: anthropicModelField
+                            objectName: "anthropicModelField"
                             anchors { fill: parent; leftMargin: 10; rightMargin: 10 }
                             verticalAlignment: Text.AlignVCenter
                             color: root.colors.text; font.pixelSize: 13; clip: true
@@ -312,6 +325,7 @@ Item {
                 }
 
                 ColumnLayout {
+                    objectName: "vertexSection"
                     Layout.fillWidth: true
                     spacing: 8
                     visible: backend.llmProvider === "vertex"
@@ -325,6 +339,7 @@ Item {
                         border.width: vertexKeyField.activeFocus ? 2 : 1
                         TextInput {
                             id: vertexKeyField
+                            objectName: "vertexKeyField"
                             anchors { fill: parent; leftMargin: 10; rightMargin: 10 }
                             verticalAlignment: Text.AlignVCenter
                             color: root.colors.text; font.pixelSize: 13; clip: true
@@ -342,6 +357,7 @@ Item {
                         border.width: vertexModelField.activeFocus ? 2 : 1
                         TextInput {
                             id: vertexModelField
+                            objectName: "vertexModelField"
                             anchors { fill: parent; leftMargin: 10; rightMargin: 10 }
                             verticalAlignment: Text.AlignVCenter
                             color: root.colors.text; font.pixelSize: 13; clip: true
@@ -358,6 +374,7 @@ Item {
                 }
 
                 ColumnLayout {
+                    objectName: "compatibleSection"
                     Layout.fillWidth: true
                     spacing: 8
                     visible: backend.llmProvider === "openai_compatible"
@@ -371,6 +388,7 @@ Item {
                         border.width: compatibleUrlField.activeFocus ? 2 : 1
                         TextInput {
                             id: compatibleUrlField
+                            objectName: "compatibleUrlField"
                             anchors { fill: parent; leftMargin: 10; rightMargin: 10 }
                             verticalAlignment: Text.AlignVCenter
                             color: root.colors.text; font.pixelSize: 13; clip: true
@@ -387,6 +405,7 @@ Item {
                         border.width: compatibleTokenField.activeFocus ? 2 : 1
                         TextInput {
                             id: compatibleTokenField
+                            objectName: "compatibleTokenField"
                             anchors { fill: parent; leftMargin: 10; rightMargin: 10 }
                             verticalAlignment: Text.AlignVCenter
                             color: root.colors.text; font.pixelSize: 13; clip: true
@@ -404,6 +423,7 @@ Item {
                         border.width: compatibleModelField.activeFocus ? 2 : 1
                         TextInput {
                             id: compatibleModelField
+                            objectName: "compatibleModelField"
                             anchors { fill: parent; leftMargin: 10; rightMargin: 10 }
                             verticalAlignment: Text.AlignVCenter
                             color: root.colors.text; font.pixelSize: 13; clip: true
@@ -423,7 +443,9 @@ Item {
                 Behavior on color { ColorAnimation { duration: 120 } }
                 Text { anchors.centerIn: parent; text: "Done"; color: "white"; font { pixelSize: 13; weight: Font.DemiBold } }
                 MouseArea {
-                    id: closeMA; anchors.fill: parent
+                    id: closeMA
+                    objectName: "settingsDoneButton"
+                    anchors.fill: parent
                     hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                     onClicked: {
                         ytdlpPathField.editingFinished()

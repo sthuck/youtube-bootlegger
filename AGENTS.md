@@ -42,6 +42,7 @@ uv run pytest -v
 - **FFmpeg**: Required at runtime for audio splitting (`shutil.which("ffmpeg")` is used). Pre-installed in the VM.
 - **No linter configured**: The project does not include a linter (ruff, flake8, pylint, etc.) in its dev dependencies or `pyproject.toml`. Pytest is the only dev tool for validation.
 - **TUI tests**: `tests/test_tui.py` drives the Textual app headlessly with `App.run_test()` / Pilot (pytest-asyncio, `asyncio_mode = "auto"`). Network and the pipeline are monkeypatched on `src.youtube_bootlegger.tui.app`.
+- **QML E2E tests**: `tests/test_qml.py` drives `Main.qml` + `AppBackend` headlessly via `QQmlApplicationEngine` and `QTest` (`QT_QPA_PLATFORM=offscreen`), locating QML controls by `objectName`. `tests/test_e2e_pipeline.py` runs a full-stack smoke test from QML through `PipelineWorker`, real FFmpeg audio splitting, and Mutagen ID3 tagging.
 - **TUI thumbnails**: `textual-image` auto-detects Kitty TGP / Sixel / Unicode half-cell rendering. Detection queries the terminal, so `app_tui.py` imports `textual_image.renderable` before Textual starts.
 - **TUI background work** runs on daemon threads (`BootleggerApp._in_background`), not Textual thread workers, because Textual joins worker threads on exit and quitting mid-download would hang.
 - **`DISPLAY` env var**: Must be set (`:1` by default in Cloud VMs) for the Qt GUI to render. Use `QT_QPA_PLATFORM=offscreen` if headless testing is needed.

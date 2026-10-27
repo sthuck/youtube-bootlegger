@@ -17,6 +17,7 @@ ApplicationWindow {
         Menu {
             title: qsTr("&File")
             Action {
+                objectName: "settingsMenuAction"
                 text: qsTr("&Settings…")
                 onTriggered: settingsPanel.open = true
             }
@@ -25,6 +26,7 @@ ApplicationWindow {
         Menu {
             title: qsTr("&Help")
             Action {
+                objectName: "helpMenuAction"
                 text: qsTr("&YouTube Bootlegger Help")
                 shortcut: "F1"
                 onTriggered: helpPanel.open = true
@@ -137,6 +139,7 @@ ApplicationWindow {
 
                         TextInput {
                             id: urlField
+                            objectName: "urlField"
                             anchors { fill: parent; leftMargin: 12; rightMargin: 12 }
                             verticalAlignment: Text.AlignVCenter
                             color: _c.text; selectionColor: _c.accent
@@ -154,6 +157,7 @@ ApplicationWindow {
                     }
 
                     Text {
+                        objectName: "urlErrorText"
                         text: backend.urlError
                         color: _c.error; font.pixelSize: 11
                         visible: backend.urlError !== ""
@@ -165,12 +169,14 @@ ApplicationWindow {
 
             /* ── Video preview ── */
             VideoPreview {
+                objectName: "videoPreview"
                 Layout.fillWidth: true
                 colors: _c
             }
 
             /* ── Tracklist panel ── */
             TracklistPanel {
+                objectName: "tracklistPanel"
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 colors: _c
@@ -210,11 +216,19 @@ ApplicationWindow {
                             Behavior on border.color { ColorAnimation { duration: 150 } }
                             TextInput {
                                 id: artistField
+                                objectName: "artistField"
                                 anchors { fill: parent; leftMargin: 12; rightMargin: 12 }
                                 verticalAlignment: Text.AlignVCenter
                                 color: _c.text; font.pixelSize: 13; clip: true
                                 text: backend.artistName
                                 onTextChanged: if (text !== backend.artistName) backend.setArtist(text)
+                                Connections {
+                                    target: backend
+                                    function onArtistNameChanged() {
+                                        if (artistField.text !== backend.artistName)
+                                            artistField.text = backend.artistName
+                                    }
+                                }
                                 Text {
                                     anchors.fill: parent; verticalAlignment: Text.AlignVCenter
                                     text: "Enter artist name"; color: _c.textMuted; font.pixelSize: 13
@@ -236,12 +250,21 @@ ApplicationWindow {
                             Behavior on border.color { ColorAnimation { duration: 150 } }
                             TextInput {
                                 id: albumField
+                                objectName: "albumField"
                                 anchors { fill: parent; leftMargin: 12; rightMargin: 12 }
                                 verticalAlignment: Text.AlignVCenter
                                 color: _c.text; font.pixelSize: 13; clip: true
                                 text: backend.albumName
                                 onTextChanged: if (text !== backend.albumName) backend.setAlbum(text)
+                                Connections {
+                                    target: backend
+                                    function onAlbumNameChanged() {
+                                        if (albumField.text !== backend.albumName)
+                                            albumField.text = backend.albumName
+                                    }
+                                }
                                 Text {
+                                    objectName: "albumPlaceholderText"
                                     anchors.fill: parent; verticalAlignment: Text.AlignVCenter
                                     text: backend.albumPlaceholder; color: _c.textMuted; font.pixelSize: 13
                                     visible: !albumField.text && !albumField.activeFocus
@@ -251,6 +274,7 @@ ApplicationWindow {
                     }
 
                     Text {
+                        objectName: "metadataErrorText"
                         text: backend.metadataError
                         color: _c.error; font.pixelSize: 11
                         visible: backend.metadataError !== ""
@@ -285,6 +309,7 @@ ApplicationWindow {
                             Behavior on border.color { ColorAnimation { duration: 150 } }
                             TextInput {
                                 id: dirField
+                                objectName: "dirField"
                                 anchors { fill: parent; leftMargin: 12; rightMargin: 12 }
                                 verticalAlignment: Text.AlignVCenter
                                 color: _c.text; font.pixelSize: 13; clip: true
@@ -300,7 +325,9 @@ ApplicationWindow {
                             Behavior on color { ColorAnimation { duration: 120 } }
                             Text { anchors.centerIn: parent; text: "Browse"; color: _c.text; font.pixelSize: 12 }
                             MouseArea {
-                                id: browseMA; anchors.fill: parent
+                                id: browseMA
+                                objectName: "browseButton"
+                                anchors.fill: parent
                                 hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                                 onClicked: folderDialog.open()
                             }
@@ -308,6 +335,7 @@ ApplicationWindow {
                     }
 
                     Text {
+                        objectName: "dirErrorText"
                         text: backend.dirError; color: _c.error; font.pixelSize: 11
                         visible: backend.dirError !== ""; wrapMode: Text.Wrap
                         Layout.fillWidth: true
@@ -317,6 +345,7 @@ ApplicationWindow {
 
             /* ── Progress panel ── */
             ProgressPanel {
+                objectName: "progressPanel"
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 colors: _c
@@ -345,7 +374,9 @@ ApplicationWindow {
                         font { pixelSize: 14; weight: Font.DemiBold }
                     }
                     MouseArea {
-                        id: startMA; anchors.fill: parent
+                        id: startMA
+                        objectName: "startButton"
+                        anchors.fill: parent
                         hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                         enabled: !backend.busy
                         onClicked: backend.startPipeline()
@@ -368,6 +399,7 @@ ApplicationWindow {
                         font.pixelSize: 13
                     }
                     MouseArea {
+                        objectName: "cancelButton"
                         anchors.fill: parent
                         cursorShape: Qt.PointingHandCursor
                         enabled: backend.busy
@@ -393,6 +425,7 @@ ApplicationWindow {
     /* ── settings panel ─────────────────────────────────────── */
     SettingsPanel {
         id: settingsPanel
+        objectName: "settingsPanel"
         colors: _c
         open: false
     }
@@ -400,6 +433,7 @@ ApplicationWindow {
     /* ── help panel ─────────────────────────────────────────── */
     HelpPanel {
         id: helpPanel
+        objectName: "helpPanel"
         colors: _c
         open: false
     }
@@ -421,7 +455,9 @@ ApplicationWindow {
     }
 
     Rectangle {
-        id: msgOverlay; visible: false; z: 100
+        id: msgOverlay
+        objectName: "msgOverlay"
+        visible: false; z: 100
         anchors.fill: parent; color: "#80000000"
 
         MouseArea { anchors.fill: parent; onClicked: msgOverlay.visible = false }
@@ -432,15 +468,15 @@ ApplicationWindow {
             color: _c.card; radius: 14
             border.color: _c.border; border.width: 1
 
-            Rectangle { id: msgStrip; width: 4; height: parent.height; radius: 2; anchors.left: parent.left; anchors.leftMargin: 12; anchors.verticalCenter: parent.verticalCenter; color: _c.success }
+            Rectangle { id: msgStrip; objectName: "msgStrip"; width: 4; height: parent.height; radius: 2; anchors.left: parent.left; anchors.leftMargin: 12; anchors.verticalCenter: parent.verticalCenter; color: _c.success }
 
             ColumnLayout {
                 id: msgContent
                 anchors { fill: parent; margins: 24; leftMargin: 28 }
                 spacing: 8
 
-                Text { id: msgTitle; color: _c.text; font { pixelSize: 16; weight: Font.Bold } }
-                Text { id: msgBody; color: _c.textSec; font.pixelSize: 13; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                Text { id: msgTitle; objectName: "msgTitle"; color: _c.text; font { pixelSize: 16; weight: Font.Bold } }
+                Text { id: msgBody; objectName: "msgBody"; color: _c.textSec; font.pixelSize: 13; wrapMode: Text.Wrap; Layout.fillWidth: true }
                 Item { Layout.fillHeight: true }
                 Rectangle {
                     Layout.alignment: Qt.AlignRight
@@ -448,7 +484,7 @@ ApplicationWindow {
                     color: closeBtnMA.containsMouse ? _c.elevated : _c.surface
                     Behavior on color { ColorAnimation { duration: 100 } }
                     Text { anchors.centerIn: parent; text: "OK"; color: _c.text; font { pixelSize: 12; weight: Font.DemiBold } }
-                    MouseArea { id: closeBtnMA; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: msgOverlay.visible = false }
+                    MouseArea { id: closeBtnMA; objectName: "msgCloseButton"; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: msgOverlay.visible = false }
                 }
             }
         }

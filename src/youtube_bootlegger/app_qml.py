@@ -13,6 +13,7 @@ from .qml_backend import AppBackend
 from .resources import APP_LOGO_PNG
 
 APP_NAME = "YouTube Bootlegger"
+QML_MAIN_FILE = Path(__file__).parent / "qml" / "Main.qml"
 
 
 def _configure_platform_identity() -> None:
@@ -25,6 +26,18 @@ def _configure_platform_identity() -> None:
     QCoreApplication.setApplicationName(APP_NAME)
 
 
+def create_qml_engine(backend: AppBackend) -> QQmlApplicationEngine:
+    """Create a QQmlApplicationEngine wired to the given AppBackend and load Main.qml."""
+    engine = QQmlApplicationEngine()
+    engine.rootContext().setContextProperty("backend", backend)
+    engine.rootContext().setContextProperty(
+        "logoUrl",
+        QUrl.fromLocalFile(str(APP_LOGO_PNG)),
+    )
+    engine.load(QUrl.fromLocalFile(str(QML_MAIN_FILE)))
+    return engine
+
+
 def run() -> int:
     """Launch the QML-based YouTube Bootlegger UI."""
     _configure_platform_identity()
@@ -35,17 +48,8 @@ def run() -> int:
     app.setApplicationVersion("0.1.0")
     app.setWindowIcon(QIcon(str(APP_LOGO_PNG)))
 
-    engine = QQmlApplicationEngine()
-
     backend = AppBackend()
-    engine.rootContext().setContextProperty("backend", backend)
-    engine.rootContext().setContextProperty(
-        "logoUrl",
-        QUrl.fromLocalFile(str(APP_LOGO_PNG)),
-    )
-
-    qml_file = Path(__file__).parent / "qml" / "Main.qml"
-    engine.load(QUrl.fromLocalFile(str(qml_file)))
+    engine = create_qml_engine(backend)
 
     if not engine.rootObjects():
         return 1
@@ -55,4 +59,6 @@ def run() -> int:
     timer.start(500)
     timer.timeout.connect(lambda: None)
 
-    return app.exec()
+    exit_code = app.exec()
+    del engine
+    return exit_code
