@@ -3,6 +3,7 @@
 from PySide6.QtCore import QObject, QRunnable, Signal
 
 from ..llm import LlmExtractionError, TracklistExtraction, extract_tracklist_metadata
+from ..llm.http import PostJson, post_json
 from ..core.settings import AppSettings
 
 
@@ -23,13 +24,13 @@ class TracklistAiWorker(QRunnable):
         video_title: str,
         raw_tracklist: str,
         *,
-        completion_fn=None,
+        http_post: PostJson = post_json,
     ):
         super().__init__()
         self._settings = settings
         self._video_title = video_title
         self._raw_tracklist = raw_tracklist
-        self._completion_fn = completion_fn
+        self._http_post = http_post
         self.signals = TracklistAiSignals()
 
     def run(self) -> None:
@@ -40,7 +41,7 @@ class TracklistAiWorker(QRunnable):
                 self._settings,
                 self._video_title,
                 self._raw_tracklist,
-                completion_fn=self._completion_fn,
+                http_post=self._http_post,
             )
             self.signals.finished.emit(result)
         except LlmExtractionError as exc:
