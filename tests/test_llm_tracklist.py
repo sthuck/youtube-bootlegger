@@ -1,33 +1,26 @@
-"""Unit tests for LLM API integration."""
+"""Unit tests for LLM settings mapping and tracklist extraction."""
 
 import json
 
 import pytest
-import requests
 
 from src.youtube_bootlegger.llm import (
     DEFAULT_ANTHROPIC_MODEL,
     DEFAULT_OPENAI_MODEL,
     DEFAULT_VERTEX_MODEL,
+    ApiProvider,
+    LlmEndpoint,
+    LlmError,
     LlmExtractionError,
     TracklistExtraction,
-    build_chat_request,
+    endpoint_from_settings,
     extract_tracklist_metadata,
     is_llm_configured,
     parse_extraction_response,
     resolve_model,
     validate_extraction,
 )
-from src.youtube_bootlegger.llm.llm_api import (
-    ANTHROPIC_MESSAGES_URL,
-    GEMINI_GENERATE_URL,
-    MAX_ERROR_DETAIL_CHARS,
-    MAX_OUTPUT_TOKENS,
-    OPENAI_CHAT_URL,
-    _error_message,
-    post_json,
-    response_text,
-)
+from src.youtube_bootlegger.llm.client import OPENAI_CHAT_URL
 from src.youtube_bootlegger.core.settings import AppSettings, LlmProvider
 
 
@@ -122,83 +115,48 @@ def _extraction_json() -> str:
     )
 
 
-class TestBuildChatRequest:
-    def test_openai_request(self):
-        settings = make_settings(
-            llm_provider=LlmProvider.OPENAI,
-            openai_api_key="sk-test",
-            openai_model=DEFAULT_OPENAI_MODEL,
-        )
-        request = build_chat_request(settings, "system", "user")
-        assert request.url == OPENAI_CHAT_URL
-        assert request.headers["Authorization"] == "Bearer sk-test"
-        assert request.body["model"] == DEFAULT_OPENAI_MODEL
-        assert request.body["max_completion_tokens"] == MAX_OUTPUT_TOKENS
-        assert "max_tokens" not in request.body
-        assert request.body["messages"][0] == {"role": "system", "content": "system"}
-        schema = request.body["response_format"]["json_schema"]
-        assert schema["name"] == "tracklist_extraction"
-        assert schema["strict"] is True
-        assert schema["schema"]["additionalProperties"] is False
-        assert set(schema["schema"]["required"]) == {
-            "template",
-            "artist_name",
-            "album_name",
-        }
+class TestEndpointFromSettings:
+    def test_maps_each_api_provider(self):
+        cases = [
+            (
+                make_settings(llm_provider=LlmProvider.OPENAI, openai_api_key="sk"),
+                LlmEndpoint(ApiProvider.OPENAI, DEFAULT_OPENAI_MODEL, "sk"),
+            ),
+            (
+                make_settings(llm_provider=LlmProvider.ANTHROPIC, anthropic_api_key="ant"),
+                LlmEndpoint(ApiProvider.ANTHROPIC, DEFAULT_ANTHROPIC_MODEL, "ant"),
+            ),
+            (
+                make_settings(llm_provider=LlmProvider.VERTEX, vertex_api_key="g"),
+                LlmEndpoint(ApiProvider.GEMINI, DEFAULT_VERTEX_MODEL, "g"),
+            ),
+            (
+                make_settings(
+                    llm_provider=LlmProvider.OPENAI_COMPATIBLE,
+                    compatible_base_url="http://localhost:11434/v1",
+                    compatible_bearer_token="tok",
+                    compatible_model="llama3",
+                ),
+                LlmEndpoint(
+                    ApiProvider.OPENAI_COMPATIBLE,
+                    "llama3",
+                    "tok",
+                    base_url="http://localhost:11434/v1",
+                ),
+            ),
+        ]
+        for settings, expected in cases:
+            assert endpoint_from_settings(settings) == expected
 
-    def test_anthropic_request(self):
-        settings = make_settings(
-            llm_provider=LlmProvider.ANTHROPIC,
-            anthropic_api_key="sk-ant",
-            anthropic_model=DEFAULT_ANTHROPIC_MODEL,
-        )
-        request = build_chat_request(settings, "system", "user")
-        assert request.url == ANTHROPIC_MESSAGES_URL
-        assert request.headers["x-api-key"] == "sk-ant"
-        assert request.headers["anthropic-version"] == "2023-06-01"
-        assert request.body["model"] == DEFAULT_ANTHROPIC_MODEL
-        assert request.body["system"] == "system"
-        assert request.body["messages"] == [{"role": "user", "content": "user"}]
-        assert request.body["output_config"]["format"]["type"] == "json_schema"
-        assert request.body["max_tokens"] == MAX_OUTPUT_TOKENS
+    def test_rejects_missing_credentials(self):
+        settings = make_settings(llm_provider=LlmProvider.OPENAI)
+        with pytest.raises(LlmError, match="not configured"):
+            endpoint_from_settings(settings)
 
-    def test_gemini_request(self):
-        settings = make_settings(
-            llm_provider=LlmProvider.VERTEX,
-            vertex_api_key="gemini-key",
-            vertex_model="gemini/gemini-2.0-flash",
-        )
-        request = build_chat_request(settings, "system", "user")
-        assert request.url == GEMINI_GENERATE_URL.format(model="gemini-2.0-flash")
-        assert request.headers["x-goog-api-key"] == "gemini-key"
-        assert request.body["systemInstruction"]["parts"][0]["text"] == "system"
-        assert request.body["contents"][0]["parts"][0]["text"] == "user"
-        config = request.body["generationConfig"]
-        assert config["responseMimeType"] == "application/json"
-        assert config["responseJsonSchema"]["additionalProperties"] is False
-
-    def test_compatible_request_includes_base_url_and_max_tokens(self):
-        settings = make_settings(
-            llm_provider=LlmProvider.OPENAI_COMPATIBLE,
-            compatible_base_url="https://example.com/v1/",
-            compatible_bearer_token="token-123",
-            compatible_model="local-model",
-        )
-        request = build_chat_request(settings, "system", "user")
-        assert request.url == "https://example.com/v1/chat/completions"
-        assert request.headers["Authorization"] == "Bearer token-123"
-        assert request.body["model"] == "local-model"
-        assert request.body["max_tokens"] == MAX_OUTPUT_TOKENS
-        assert "max_completion_tokens" not in request.body
-
-    def test_compatible_request_omits_auth_without_token(self):
-        settings = make_settings(
-            llm_provider=LlmProvider.OPENAI_COMPATIBLE,
-            compatible_base_url="https://example.com/v1/chat/completions",
-        )
-        request = build_chat_request(settings, "system", "user")
-        assert request.url == "https://example.com/v1/chat/completions"
-        assert "Authorization" not in request.headers
+    def test_rejects_chatgpt_lite(self):
+        settings = make_settings(llm_provider=LlmProvider.CHATGPT_LITE)
+        with pytest.raises(LlmError, match="browser"):
+            endpoint_from_settings(settings)
 
 
 class TestParseExtractionResponse:
@@ -342,6 +300,13 @@ class TestExtractTracklistMetadata:
         assert captured["headers"]["Authorization"] == "Bearer sk-test"
         assert captured["body"]["model"] == DEFAULT_OPENAI_MODEL
         assert captured["body"]["messages"][1]["content"].startswith("YouTube Bootlegger")
+        json_schema = captured["body"]["response_format"]["json_schema"]
+        assert json_schema["name"] == "tracklist_extraction"
+        assert set(json_schema["schema"]["required"]) == {
+            "template",
+            "artist_name",
+            "album_name",
+        }
 
     def test_parses_anthropic_and_gemini_envelopes(self):
         content = _extraction_json()
@@ -428,114 +393,3 @@ class TestExtractTracklistMetadata:
                 http_post=fake_post,
             )
 
-
-class TestResponseText:
-    @pytest.mark.parametrize(
-        ("provider", "body"),
-        [
-            (
-                LlmProvider.OPENAI,
-                {"choices": [{"message": {"content": ""}, "finish_reason": "length"}]},
-            ),
-            (
-                LlmProvider.ANTHROPIC,
-                {"content": [{"type": "text", "text": "{"}], "stop_reason": "max_tokens"},
-            ),
-            (LlmProvider.VERTEX, {"candidates": [{"finishReason": "MAX_TOKENS"}]}),
-        ],
-    )
-    def test_reports_truncated_output(self, provider, body):
-        with pytest.raises(LlmExtractionError, match="cut off at the output token limit"):
-            response_text(provider, body)
-
-    def test_reports_gemini_safety_stop_without_content(self):
-        body = {"candidates": [{"finishReason": "SAFETY"}]}
-        with pytest.raises(LlmExtractionError, match=r"stopped before finishing \(SAFETY\)"):
-            response_text(LlmProvider.VERTEX, body)
-
-    def test_reports_openai_content_filter(self):
-        body = {
-            "choices": [{"message": {"content": None}, "finish_reason": "content_filter"}]
-        }
-        with pytest.raises(LlmExtractionError, match="content_filter"):
-            response_text(LlmProvider.OPENAI, body)
-
-    def test_accepts_normal_finish(self):
-        body = {"candidates": [{"content": {"parts": [{"text": "{}"}]}, "finishReason": "STOP"}]}
-        assert response_text(LlmProvider.VERTEX, body) == "{}"
-
-
-class TestErrorMessage:
-    def test_truncates_non_json_body(self):
-        html = b"<html>" + b"x" * 5000 + b"</html>"
-        message = _error_message(html)
-        assert len(message) <= MAX_ERROR_DETAIL_CHARS + 1
-        assert message.endswith("\u2026")
-
-    def test_keeps_short_non_json_body(self):
-        assert _error_message(b"Bad Gateway") == "Bad Gateway"
-
-    def test_prefers_embedded_json_error(self):
-        assert _error_message(b'{"error": {"message": "nope"}}') == "nope"
-
-
-def test_openai_request_uses_large_token_budget():
-    settings = make_settings(llm_provider=LlmProvider.OPENAI, openai_api_key="sk-test")
-    request = build_chat_request(settings, "system", "user")
-    assert request.body["max_completion_tokens"] == MAX_OUTPUT_TOKENS == 40_000
-
-
-def _fake_response(status: int, content: bytes, headers: dict | None = None):
-    response = requests.Response()
-    response.status_code = status
-    response._content = content
-    response.headers.update(headers or {})
-    return response
-
-
-class TestPostJson:
-    def test_sends_json_without_following_redirects(self, monkeypatch):
-        calls = {}
-
-        def fake_post(url, **kwargs):
-            calls["url"] = url
-            calls.update(kwargs)
-            return _fake_response(200, b'{"ok": true}')
-
-        monkeypatch.setattr(requests, "post", fake_post)
-        assert post_json("https://x/v1", {"A": "b"}, {"k": 1}) == {"ok": True}
-        assert calls["url"] == "https://x/v1"
-        assert calls["json"] == {"k": 1}
-        assert calls["headers"] == {"A": "b"}
-        assert calls["allow_redirects"] is False
-
-    def test_rejects_redirect(self, monkeypatch):
-        monkeypatch.setattr(
-            requests,
-            "post",
-            lambda *_a, **_k: _fake_response(301, b"", {"Location": "https://other/v1"}),
-        )
-        with pytest.raises(LlmExtractionError, match="redirect to https://other/v1"):
-            post_json("http://x/v1", {}, {})
-
-    def test_reports_http_error_detail(self, monkeypatch):
-        monkeypatch.setattr(
-            requests,
-            "post",
-            lambda *_a, **_k: _fake_response(401, b'{"error": {"message": "bad key"}}'),
-        )
-        with pytest.raises(LlmExtractionError, match="HTTP 401: bad key"):
-            post_json("https://x/v1", {}, {})
-
-    def test_wraps_connection_errors(self, monkeypatch):
-        def boom(*_a, **_k):
-            raise requests.ConnectionError("refused")
-
-        monkeypatch.setattr(requests, "post", boom)
-        with pytest.raises(LlmExtractionError, match="LLM request failed: refused"):
-            post_json("https://x/v1", {}, {})
-
-    def test_rejects_non_object_json(self, monkeypatch):
-        monkeypatch.setattr(requests, "post", lambda *_a, **_k: _fake_response(200, b"[]"))
-        with pytest.raises(LlmExtractionError, match="unexpected response shape"):
-            post_json("https://x/v1", {}, {})

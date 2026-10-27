@@ -3,6 +3,7 @@
 from PySide6.QtCore import QObject, QRunnable, Signal
 
 from ..llm import LlmExtractionError, TracklistExtraction, extract_tracklist_metadata
+from ..llm.http import PostJson, post_json
 from ..core.settings import AppSettings
 
 
@@ -23,7 +24,7 @@ class TracklistAiWorker(QRunnable):
         video_title: str,
         raw_tracklist: str,
         *,
-        http_post=None,
+        http_post: PostJson = post_json,
     ):
         super().__init__()
         self._settings = settings
