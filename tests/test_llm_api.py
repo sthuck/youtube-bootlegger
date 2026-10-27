@@ -3,6 +3,7 @@
 import json
 
 import pytest
+import requests
 
 from src.youtube_bootlegger.llm import (
     DEFAULT_ANTHROPIC_MODEL,
@@ -20,7 +21,12 @@ from src.youtube_bootlegger.llm import (
 from src.youtube_bootlegger.llm.llm_api import (
     ANTHROPIC_MESSAGES_URL,
     GEMINI_GENERATE_URL,
+    MAX_ERROR_DETAIL_CHARS,
+    MAX_OUTPUT_TOKENS,
     OPENAI_CHAT_URL,
+    _error_message,
+    post_json,
+    response_text,
 )
 from src.youtube_bootlegger.core.settings import AppSettings, LlmProvider
 
@@ -127,7 +133,7 @@ class TestBuildChatRequest:
         assert request.url == OPENAI_CHAT_URL
         assert request.headers["Authorization"] == "Bearer sk-test"
         assert request.body["model"] == DEFAULT_OPENAI_MODEL
-        assert request.body["max_completion_tokens"] == 4096
+        assert request.body["max_completion_tokens"] == MAX_OUTPUT_TOKENS
         assert "max_tokens" not in request.body
         assert request.body["messages"][0] == {"role": "system", "content": "system"}
         schema = request.body["response_format"]["json_schema"]
@@ -154,7 +160,7 @@ class TestBuildChatRequest:
         assert request.body["system"] == "system"
         assert request.body["messages"] == [{"role": "user", "content": "user"}]
         assert request.body["output_config"]["format"]["type"] == "json_schema"
-        assert request.body["max_tokens"] == 4096
+        assert request.body["max_tokens"] == MAX_OUTPUT_TOKENS
 
     def test_gemini_request(self):
         settings = make_settings(
@@ -182,7 +188,7 @@ class TestBuildChatRequest:
         assert request.url == "https://example.com/v1/chat/completions"
         assert request.headers["Authorization"] == "Bearer token-123"
         assert request.body["model"] == "local-model"
-        assert request.body["max_tokens"] == 4096
+        assert request.body["max_tokens"] == MAX_OUTPUT_TOKENS
         assert "max_completion_tokens" not in request.body
 
     def test_compatible_request_omits_auth_without_token(self):
@@ -325,7 +331,7 @@ class TestExtractTracklistMetadata:
             settings,
             "The Band Live at Madison Square Garden",
             "[0:00] Opener\n[5:00] Closer",
-            post_json=fake_post,
+            http_post=fake_post,
         )
 
         assert isinstance(result, TracklistExtraction)
@@ -360,7 +366,7 @@ class TestExtractTracklistMetadata:
                 settings,
                 "The Band Live",
                 "[0:00] Opener\n[5:00] Closer",
-                post_json=lambda _url, _headers, _body, envelope=envelope: envelope,
+                http_post=lambda _url, _headers, _body, envelope=envelope: envelope,
             )
             assert result.template == "[%mm%:%ss%] %songname%"
 
@@ -385,7 +391,7 @@ class TestExtractTracklistMetadata:
                 settings,
                 "Show",
                 "[0:00] Opener\n[5:00] Closer",
-                post_json=fake_post,
+                http_post=fake_post,
             )
 
     def test_wraps_transport_errors(self):
@@ -402,7 +408,7 @@ class TestExtractTracklistMetadata:
                 settings,
                 "Show",
                 "Song - 0:00",
-                post_json=failing_post,
+                http_post=failing_post,
             )
 
     def test_surfaces_provider_error_payload(self):
@@ -419,5 +425,117 @@ class TestExtractTracklistMetadata:
                 settings,
                 "Show",
                 "Song - 0:00",
-                post_json=fake_post,
+                http_post=fake_post,
             )
+
+
+class TestResponseText:
+    @pytest.mark.parametrize(
+        ("provider", "body"),
+        [
+            (
+                LlmProvider.OPENAI,
+                {"choices": [{"message": {"content": ""}, "finish_reason": "length"}]},
+            ),
+            (
+                LlmProvider.ANTHROPIC,
+                {"content": [{"type": "text", "text": "{"}], "stop_reason": "max_tokens"},
+            ),
+            (LlmProvider.VERTEX, {"candidates": [{"finishReason": "MAX_TOKENS"}]}),
+        ],
+    )
+    def test_reports_truncated_output(self, provider, body):
+        with pytest.raises(LlmExtractionError, match="cut off at the output token limit"):
+            response_text(provider, body)
+
+    def test_reports_gemini_safety_stop_without_content(self):
+        body = {"candidates": [{"finishReason": "SAFETY"}]}
+        with pytest.raises(LlmExtractionError, match=r"stopped before finishing \(SAFETY\)"):
+            response_text(LlmProvider.VERTEX, body)
+
+    def test_reports_openai_content_filter(self):
+        body = {
+            "choices": [{"message": {"content": None}, "finish_reason": "content_filter"}]
+        }
+        with pytest.raises(LlmExtractionError, match="content_filter"):
+            response_text(LlmProvider.OPENAI, body)
+
+    def test_accepts_normal_finish(self):
+        body = {"candidates": [{"content": {"parts": [{"text": "{}"}]}, "finishReason": "STOP"}]}
+        assert response_text(LlmProvider.VERTEX, body) == "{}"
+
+
+class TestErrorMessage:
+    def test_truncates_non_json_body(self):
+        html = b"<html>" + b"x" * 5000 + b"</html>"
+        message = _error_message(html)
+        assert len(message) <= MAX_ERROR_DETAIL_CHARS + 1
+        assert message.endswith("\u2026")
+
+    def test_keeps_short_non_json_body(self):
+        assert _error_message(b"Bad Gateway") == "Bad Gateway"
+
+    def test_prefers_embedded_json_error(self):
+        assert _error_message(b'{"error": {"message": "nope"}}') == "nope"
+
+
+def test_openai_request_uses_large_token_budget():
+    settings = make_settings(llm_provider=LlmProvider.OPENAI, openai_api_key="sk-test")
+    request = build_chat_request(settings, "system", "user")
+    assert request.body["max_completion_tokens"] == MAX_OUTPUT_TOKENS == 40_000
+
+
+def _fake_response(status: int, content: bytes, headers: dict | None = None):
+    response = requests.Response()
+    response.status_code = status
+    response._content = content
+    response.headers.update(headers or {})
+    return response
+
+
+class TestPostJson:
+    def test_sends_json_without_following_redirects(self, monkeypatch):
+        calls = {}
+
+        def fake_post(url, **kwargs):
+            calls["url"] = url
+            calls.update(kwargs)
+            return _fake_response(200, b'{"ok": true}')
+
+        monkeypatch.setattr(requests, "post", fake_post)
+        assert post_json("https://x/v1", {"A": "b"}, {"k": 1}) == {"ok": True}
+        assert calls["url"] == "https://x/v1"
+        assert calls["json"] == {"k": 1}
+        assert calls["headers"] == {"A": "b"}
+        assert calls["allow_redirects"] is False
+
+    def test_rejects_redirect(self, monkeypatch):
+        monkeypatch.setattr(
+            requests,
+            "post",
+            lambda *_a, **_k: _fake_response(301, b"", {"Location": "https://other/v1"}),
+        )
+        with pytest.raises(LlmExtractionError, match="redirect to https://other/v1"):
+            post_json("http://x/v1", {}, {})
+
+    def test_reports_http_error_detail(self, monkeypatch):
+        monkeypatch.setattr(
+            requests,
+            "post",
+            lambda *_a, **_k: _fake_response(401, b'{"error": {"message": "bad key"}}'),
+        )
+        with pytest.raises(LlmExtractionError, match="HTTP 401: bad key"):
+            post_json("https://x/v1", {}, {})
+
+    def test_wraps_connection_errors(self, monkeypatch):
+        def boom(*_a, **_k):
+            raise requests.ConnectionError("refused")
+
+        monkeypatch.setattr(requests, "post", boom)
+        with pytest.raises(LlmExtractionError, match="LLM request failed: refused"):
+            post_json("https://x/v1", {}, {})
+
+    def test_rejects_non_object_json(self, monkeypatch):
+        monkeypatch.setattr(requests, "post", lambda *_a, **_k: _fake_response(200, b"[]"))
+        with pytest.raises(LlmExtractionError, match="unexpected response shape"):
+            post_json("https://x/v1", {}, {})

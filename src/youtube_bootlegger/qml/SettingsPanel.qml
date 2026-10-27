@@ -257,7 +257,7 @@ Item {
                             onEditingFinished: backend.setOpenaiModel(text)
                             Text {
                                 anchors.fill: parent; verticalAlignment: Text.AlignVCenter
-                                text: "gpt-5.4-mini"
+                                text: "gpt-6-luna"
                                 color: root.colors.textMuted; font.pixelSize: 12
                                 visible: !openaiModelField.text && !openaiModelField.activeFocus
                             }
@@ -349,7 +349,7 @@ Item {
                             onEditingFinished: backend.setVertexModel(text)
                             Text {
                                 anchors.fill: parent; verticalAlignment: Text.AlignVCenter
-                                text: "gemini-2.0-flash"
+                                text: "gemini-3.8-flash"
                                 color: root.colors.textMuted; font.pixelSize: 12
                                 visible: !vertexModelField.text && !vertexModelField.activeFocus
                             }

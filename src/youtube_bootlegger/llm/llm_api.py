@@ -3,22 +3,21 @@
 from __future__ import annotations
 
 import json
-import urllib.error
 import urllib.parse
-import urllib.request
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+import requests
 from pydantic import BaseModel, Field, ValidationError
 
 from ..core.settings import AppSettings, LlmProvider
 from ..core.template_parser import DEFAULT_TEMPLATE, preview_parse, validate_template
 from .prompt import SYSTEM_PROMPT, build_extraction_prompt
 
-DEFAULT_OPENAI_MODEL = "gpt-5.4-mini"
+DEFAULT_OPENAI_MODEL = "gpt-6-luna"
 DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-5"
-DEFAULT_VERTEX_MODEL = "gemini-2.0-flash"
+DEFAULT_VERTEX_MODEL = "gemini-3.8-flash"
 DEFAULT_COMPATIBLE_MODEL = "gpt-4o-mini"
 
 OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions"
@@ -27,7 +26,9 @@ GEMINI_GENERATE_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 )
 ANTHROPIC_VERSION = "2023-06-01"
-MAX_OUTPUT_TOKENS = 4096
+# Reasoning models spend hidden thinking tokens from this same budget.
+MAX_OUTPUT_TOKENS = 40_000
+MAX_ERROR_DETAIL_CHARS = 500
 REQUEST_TIMEOUT_SECONDS = 120
 
 PostJson = Callable[[str, Mapping[str, str], Mapping[str, Any]], Mapping[str, Any]]
@@ -165,10 +166,8 @@ def build_chat_request(settings: AppSettings, system: str, user: str) -> ChatReq
             provider=provider,
         )
     if provider == LlmProvider.OPENAI_COMPATIBLE:
-        headers = _json_headers()
         token = settings.compatible_bearer_token.strip()
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
+        headers = _bearer_headers(token) if token else _json_headers()
         return ChatRequest(
             url=_compatible_chat_url(settings.compatible_base_url),
             headers=headers,
@@ -186,24 +185,33 @@ def post_json(
     timeout: float = REQUEST_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
     """POST a JSON body and return the decoded JSON object."""
-    request = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={str(key): str(value) for key, value in headers.items()},
-        method="POST",
-    )
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            raw = response.read()
-    except urllib.error.HTTPError as exc:
-        detail = _error_message(exc.read())
-        message = f"LLM request failed: HTTP {exc.code}"
+        # Redirects are refused: a POST would be replayed as a GET, and the
+        # API key would be sent to wherever the redirect points.
+        response = requests.post(
+            url,
+            json=payload,
+            headers=dict(headers),
+            timeout=timeout,
+            allow_redirects=False,
+        )
+    except requests.RequestException as exc:
+        raise LlmExtractionError(f"LLM request failed: {exc}") from exc
+
+    if response.is_redirect:
+        location = response.headers.get("Location", "")
+        raise LlmExtractionError(
+            f"LLM request failed: HTTP {response.status_code} redirect to {location}. "
+            "Check the base URL."
+        )
+    if not response.ok:
+        detail = _error_message(response.content)
+        message = f"LLM request failed: HTTP {response.status_code}"
         if detail:
             message = f"{message}: {detail}"
-        raise LlmExtractionError(message) from exc
-    except urllib.error.URLError as exc:
-        raise LlmExtractionError(f"LLM request failed: {exc.reason}") from exc
+        raise LlmExtractionError(message)
 
+    raw = response.content
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError as exc:
@@ -211,9 +219,6 @@ def post_json(
     if not isinstance(parsed, dict):
         raise LlmExtractionError("LLM returned an unexpected response shape")
     return parsed
-
-
-_default_post_json = post_json
 
 
 def parse_extraction_response(content: str | dict[str, Any]) -> TracklistExtraction:
@@ -275,7 +280,7 @@ def extract_tracklist_metadata(
     video_title: str,
     raw_tracklist: str,
     *,
-    post_json: PostJson | None = None,
+    http_post: PostJson | None = None,
 ) -> TracklistExtraction:
     """Call the configured LLM to extract template and metadata.
 
@@ -283,7 +288,7 @@ def extract_tracklist_metadata(
         settings: Application settings with LLM provider configuration.
         video_title: Title of the YouTube video.
         raw_tracklist: User-entered raw track list text.
-        post_json: Optional override for the HTTP POST (for tests).
+        http_post: Optional override for the HTTP POST (for tests).
 
     Returns:
         Parsed extraction result.
@@ -306,7 +311,7 @@ def extract_tracklist_metadata(
 
     prompt = build_extraction_prompt(video_title, raw_tracklist)
     request = build_chat_request(settings, SYSTEM_PROMPT, prompt)
-    send = post_json if post_json is not None else _default_post_json
+    send = http_post if http_post is not None else post_json
 
     try:
         body = send(request.url, request.headers, request.body)
@@ -422,13 +427,15 @@ def _error_message(raw: bytes) -> str:
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError:
-        return raw.decode("utf-8", errors="replace").strip()
+        payload = None
     if isinstance(payload, dict):
         message = _embedded_error(payload)
         if message:
             return message
     text = raw.decode("utf-8", errors="replace").strip()
-    return text[:500]
+    if len(text) > MAX_ERROR_DETAIL_CHARS:
+        return text[:MAX_ERROR_DETAIL_CHARS].rstrip() + "…"
+    return text
 
 
 def _embedded_error(body: Mapping[str, Any]) -> str | None:
@@ -449,7 +456,8 @@ def _embedded_error(body: Mapping[str, Any]) -> str | None:
 
 def _openai_text(body: Mapping[str, Any]) -> str:
     try:
-        message = body["choices"][0]["message"]
+        choice = body["choices"][0]
+        message = choice["message"]
     except (KeyError, IndexError, TypeError) as exc:
         raise LlmExtractionError("LLM returned an unexpected response shape") from exc
     if not isinstance(message, Mapping):
@@ -457,6 +465,7 @@ def _openai_text(body: Mapping[str, Any]) -> str:
     refusal = message.get("refusal")
     if isinstance(refusal, str) and refusal.strip():
         raise LlmExtractionError(f"LLM request failed: {refusal.strip()}")
+    _raise_if_stopped_early(choice.get("finish_reason"), ok=("stop",))
     content = message.get("content")
     if isinstance(content, str):
         return content
@@ -469,17 +478,38 @@ def _anthropic_text(body: Mapping[str, Any]) -> str:
     content = body.get("content")
     if not isinstance(content, list):
         raise LlmExtractionError("LLM returned an unexpected response shape")
+    _raise_if_stopped_early(body.get("stop_reason"), ok=("end_turn", "stop_sequence"))
     return _text_from_parts(content)
 
 
 def _gemini_text(body: Mapping[str, Any]) -> str:
     try:
-        parts = body["candidates"][0]["content"]["parts"]
+        candidate = body["candidates"][0]
     except (KeyError, IndexError, TypeError) as exc:
         raise LlmExtractionError("LLM returned an unexpected response shape") from exc
+    if not isinstance(candidate, Mapping):
+        raise LlmExtractionError("LLM returned an unexpected response shape")
+    # Blocked or truncated candidates often carry no content at all, so check first.
+    _raise_if_stopped_early(candidate.get("finishReason"), ok=("STOP",))
+    content = candidate.get("content")
+    parts = content.get("parts") if isinstance(content, Mapping) else None
     if not isinstance(parts, list):
         raise LlmExtractionError("LLM returned an unexpected response shape")
     return _text_from_parts(parts)
+
+
+_TRUNCATED_REASONS = frozenset({"length", "max_tokens", "MAX_TOKENS"})
+
+
+def _raise_if_stopped_early(reason: Any, *, ok: tuple[str, ...]) -> None:
+    """Raise when the provider reports it stopped for anything but a normal finish."""
+    if not isinstance(reason, str) or not reason or reason in ok:
+        return
+    if reason in _TRUNCATED_REASONS:
+        raise LlmExtractionError(
+            f"LLM response was cut off at the output token limit ({reason})"
+        )
+    raise LlmExtractionError(f"LLM stopped before finishing ({reason})")
 
 
 def _text_from_parts(parts: list[Any]) -> str:
