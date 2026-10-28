@@ -1,6 +1,11 @@
 """User-facing help text shared by the QML and TUI help panels."""
 
 from ..core.template_parser import DEFAULT_TEMPLATE
+from .track_finder import (
+    AUTO_FIND_SETTING_LABEL,
+    DETECT_FORMAT_BUTTON_LABEL,
+    FIND_BUTTON_LABEL,
+)
 
 
 def build_help_content() -> dict:
@@ -106,10 +111,18 @@ def build_help_content() -> dict:
         ),
         "aiTitle": "AI ASSIST",
         "aiBody": (
-            "Click the AI button next to the track list to auto-detect the best "
-            "template, artist, and album from your raw track list and video title. "
-            "Requires an LLM provider configured in Settings (gear icon). Track list "
-            "text and video title are sent to the selected provider."
+            f"With an empty track list, {FIND_BUTTON_LABEL} looks for a set list in "
+            "the video's description, chapters and comments, then fills in the track "
+            "list, the template, and the artist and album if they're empty. The log "
+            "says where the list came from; check it before downloading, or Undo. "
+            f"With \"{AUTO_FIND_SETTING_LABEL}\" on in Settings, this runs on its own "
+            "when a video loads. Finding needs an API model (OpenAI, Anthropic, …), "
+            "not ChatGPT Lite.\n\n"
+            f"Once the track list has text, the button becomes {DETECT_FORMAT_BUTTON_LABEL}: "
+            "it detects the best template, artist, and album from your track list and "
+            "the video title. This works with any provider, including ChatGPT Lite.\n\n"
+            "Configure the provider in Settings (gear icon). The video's title, "
+            "description, chapters and comments, or your track list, are sent to it."
         ),
         "outputTitle": "OUTPUT",
         "outputBody": (

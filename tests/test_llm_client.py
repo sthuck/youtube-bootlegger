@@ -51,6 +51,24 @@ class TestStrictJsonSchema:
         assert "title" not in schema
         assert "title" not in schema["properties"]["city"]
 
+    def test_inlines_nested_models_and_makes_them_strict(self):
+        class Entry(BaseModel):
+            title: str
+            seconds: int
+
+        class Listing(BaseModel):
+            entries: list[Entry]
+
+        schema = strict_json_schema(Listing)
+        assert "$defs" not in schema
+        item = schema["properties"]["entries"]["items"]
+        assert item["type"] == "object"
+        # A field may be called "title"; only the keyword is dropped.
+        assert list(item["properties"]) == ["title", "seconds"]
+        assert item["required"] == ["title", "seconds"]
+        assert item["additionalProperties"] is False
+        assert "title" not in item["properties"]["title"]
+
 
 class TestBuildChatRequest:
     def test_openai_request(self):

@@ -2,6 +2,11 @@
 
 from src.youtube_bootlegger.core.template_parser import DEFAULT_TEMPLATE
 from src.youtube_bootlegger.app_logic.help_content import build_help_content
+from src.youtube_bootlegger.app_logic.track_finder import (
+    AUTO_FIND_SETTING_LABEL,
+    DETECT_FORMAT_BUTTON_LABEL,
+    FIND_BUTTON_LABEL,
+)
 
 
 class TestHelpContent:
@@ -28,3 +33,11 @@ class TestHelpContent:
     def test_step_numbers_are_sequential(self):
         steps = build_help_content()["steps"]
         assert [step["n"] for step in steps] == ["1", "2", "3", "4", "5", "6"]
+
+
+    def test_ai_help_covers_both_button_modes_and_the_setting(self):
+        body = build_help_content()["aiBody"]
+        assert FIND_BUTTON_LABEL in body
+        assert DETECT_FORMAT_BUTTON_LABEL in body
+        assert AUTO_FIND_SETTING_LABEL in body
+        assert "ChatGPT Lite" in body

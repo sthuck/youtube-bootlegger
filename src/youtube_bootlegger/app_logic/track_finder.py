@@ -11,10 +11,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
-from ..core.settings import AppSettings
+from ..core.settings import AppSettings, LlmProvider
 from ..core.template_parser import DEFAULT_TEMPLATE
-from ..core.video_info import VideoInfo
-from ..llm.track_finder import FoundTrack, TracklistFindResult
+from ..core.video_info import DEFAULT_COMMENT_LIMIT, VideoInfo
+from ..llm.config import is_llm_configured
+from ..llm.track_finder import FindOutcome, FoundTrack, TracklistFindResult
 
 # The finder always writes the track list in this format.
 FIND_TEMPLATE = DEFAULT_TEMPLATE
@@ -36,6 +37,8 @@ NEEDS_API_MODEL_MESSAGE = (
     "Finding a track list needs an API model (OpenAI, Anthropic, …), "
     "not ChatGPT Lite. Choose one in Settings."
 )
+
+VIDEO_NOT_LOADED_MESSAGE = "Please wait for video info to load before using AI."
 
 AUTO_FIND_SETTING_LABEL = "Find track lists automatically"
 AUTO_FIND_SETTING_NOTE = (
@@ -97,17 +100,17 @@ class FindApplication:
 
 def ai_button_mode(tracklist_text: str) -> AiButtonMode:
     """FIND when the box is blank (whitespace only), else DETECT_FORMAT."""
-    raise NotImplementedError
+    return AiButtonMode.DETECT_FORMAT if tracklist_text.strip() else AiButtonMode.FIND
 
 
 def ai_button_label(mode: AiButtonMode) -> str:
     """FIND_BUTTON_LABEL or DETECT_FORMAT_BUTTON_LABEL."""
-    raise NotImplementedError
+    return FIND_BUTTON_LABEL if mode == AiButtonMode.FIND else DETECT_FORMAT_BUTTON_LABEL
 
 
 def has_api_model(settings: AppSettings) -> bool:
     """True when an API provider is configured (is_llm_configured and not ChatGPT Lite)."""
-    raise NotImplementedError
+    return settings.llm_provider != LlmProvider.CHATGPT_LITE and is_llm_configured(settings)
 
 
 def preview_comment_limit(settings: AppSettings) -> int:
@@ -118,7 +121,7 @@ def preview_comment_limit(settings: AppSettings) -> int:
     loaded before an API model was configured has no comments, and finding
     then uses the description and chapters only.)
     """
-    raise NotImplementedError
+    return DEFAULT_COMMENT_LIMIT if has_api_model(settings) else 0
 
 
 def should_auto_find(
@@ -131,7 +134,12 @@ def should_auto_find(
     True only if settings.auto_find_tracklist, has_api_model(settings), the
     box is blank, and info.duration > 0 (skips live streams and premieres).
     """
-    raise NotImplementedError
+    return (
+        settings.auto_find_tracklist
+        and has_api_model(settings)
+        and not tracklist_text.strip()
+        and info.duration > 0
+    )
 
 
 def check_find_ready(info: VideoInfo | None, settings: AppSettings) -> str | None:
@@ -141,7 +149,11 @@ def check_find_ready(info: VideoInfo | None, settings: AppSettings) -> str | Non
     NEEDS_API_MODEL_MESSAGE without an API model. (DETECT_FORMAT clicks keep
     using check_ai_assist_ready, unchanged.)
     """
-    raise NotImplementedError
+    if info is None:
+        return VIDEO_NOT_LOADED_MESSAGE
+    if not has_api_model(settings):
+        return NEEDS_API_MODEL_MESSAGE
+    return None
 
 
 def render_tracklist(tracks: tuple[FoundTrack, ...]) -> str:
@@ -151,7 +163,10 @@ def render_tracklist(tracks: tuple[FoundTrack, ...]) -> str:
     newline. Minutes are total minutes, so hour-long sets stay parseable
     without %hh%: 3725 s → ``62:05``.
     """
-    raise NotImplementedError
+    return "\n".join(
+        f"{track.title} - {track.start_seconds // 60}:{track.start_seconds % 60:02d}"
+        for track in tracks
+    )
 
 
 def video_sources_log_line(info: VideoInfo) -> LogLine:
@@ -160,7 +175,23 @@ def video_sources_log_line(info: VideoInfo) -> LogLine:
     Parts: "description" or "no description"; "N chapter(s)"; "N comment(s)"
     (singular for 1, e.g. "1 chapter").
     """
-    raise NotImplementedError
+    parts = [
+        "description" if info.description.strip() else "no description",
+        _count(len(info.chapters), "chapter"),
+        _count(len(info.comments), "comment"),
+    ]
+    return LogLine("Video info: " + ", ".join(parts))
+
+
+def _count(n: int, noun: str) -> str:
+    return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
+
+
+_CANCEL_LOG = {
+    CancelReason.STOPPED: "AI: search stopped",
+    CancelReason.EDITED: "AI: search stopped because you edited the track list",
+    CancelReason.VIDEO_CHANGED: "AI: search stopped because the video changed",
+}
 
 
 class TrackFinderSession:
@@ -172,14 +203,20 @@ class TrackFinderSession:
     """
 
     def __init__(self) -> None:
-        raise NotImplementedError
+        self._last_token = 0
+        self._token: int | None = None  # The running search's token.
+        self._cache: dict[str, TracklistFindResult] = {}
+        self._filled_text: str | None = None  # What the finder wrote, while unedited.
+        self._before_fill: FormValues | None = None
+        self._banner = ""
+        self._hint_dismissed = False
 
     # ── Searching ───────────────────────────────────────────────────
 
     @property
     def searching(self) -> bool:
         """True between begin() and complete()/fail()/cancel()."""
-        raise NotImplementedError
+        return self._token is not None
 
     def begin(self, video_id: str) -> int:
         """Start a search for ``video_id``; returns its token.
@@ -188,18 +225,20 @@ class TrackFinderSession:
         then check cached(video_id): if present, call complete() right away
         with it instead of starting background work.
         """
-        raise NotImplementedError
+        self._last_token += 1
+        self._token = self._last_token
+        return self._token
 
     def cached(self, video_id: str) -> TracklistFindResult | None:
         """The result of an earlier search for this video in this session, if any.
 
         Only complete() results are cached (any outcome); failures aren't.
         """
-        raise NotImplementedError
+        return self._cache.get(video_id)
 
     def is_current(self, token: int) -> bool:
         """Whether ``token`` belongs to the running search."""
-        raise NotImplementedError
+        return self._token is not None and token == self._token
 
     def complete(
         self,
@@ -217,7 +256,8 @@ class TrackFinderSession:
         "✨ Filled by AI from <label>: N tracks. Check it before downloading."
         ("1 track" singular). Log lines, in order:
 
-        - FOUND: "AI: found N timestamped tracks in <label>", then
+        - FOUND: "AI: found N timestamped tracks in <label>" ("1 timestamped
+          track" singular), then
           'AI: format set to "<FIND_TEMPLATE>"'
         - UNTIMED: "AI: found song names without timestamps in <label>; add
           timestamps to use it" (warn), values None, no banner
@@ -228,7 +268,48 @@ class TrackFinderSession:
         is not applied: values None, no banner, log "AI: found a track list,
         but you'd already filled one in; left it unchanged" (warn).
         """
-        raise NotImplementedError
+        if not self.is_current(token):
+            return None
+        self._token = None
+        self._cache[video_id] = result
+
+        if result.outcome == FindOutcome.UNTIMED:
+            line = LogLine(
+                f"AI: found song names without timestamps in {result.source.label}; "
+                "add timestamps to use it",
+                "warn",
+            )
+            return FindApplication(None, "", (line,))
+        if result.outcome != FindOutcome.FOUND:
+            line = LogLine("AI: no track list found in the description, chapters or comments")
+            return FindApplication(None, "", (line,))
+        if current.tracklist.strip():
+            line = LogLine(
+                "AI: found a track list, but you'd already filled one in; left it unchanged",
+                "warn",
+            )
+            return FindApplication(None, "", (line,))
+
+        values = FormValues(
+            tracklist=render_tracklist(result.tracks),
+            template=FIND_TEMPLATE,
+            artist=current.artist if current.artist.strip() else result.artist_name,
+            album=current.album if current.album.strip() else result.album_name,
+        )
+        self._before_fill = current
+        self._filled_text = values.tracklist
+        self._banner = (
+            f"✨ Filled by AI from {result.source.label}: "
+            f"{_count(len(result.tracks), 'track')}. Check it before downloading."
+        )
+        log = (
+            LogLine(
+                f"AI: found {_count(len(result.tracks), 'timestamped track')} "
+                f"in {result.source.label}"
+            ),
+            LogLine(f'AI: format set to "{FIND_TEMPLATE}"'),
+        )
+        return FindApplication(values, self._banner, log)
 
     def fail(self, token: int, message: str) -> LogLine | None:
         """Finish a search with an error. None for a stale token.
@@ -237,7 +318,10 @@ class TrackFinderSession:
         log it; a manual click also shows ``message`` as a message box/toast,
         an automatic run only logs.
         """
-        raise NotImplementedError
+        if not self.is_current(token):
+            return None
+        self._token = None
+        return LogLine(f"AI: couldn't find a track list: {message}", "error")
 
     def cancel(self, reason: CancelReason) -> LogLine | None:
         """Cancel the running search; None if nothing was running.
@@ -246,24 +330,27 @@ class TrackFinderSession:
         you edited the track list"; VIDEO_CHANGED → "AI: search stopped
         because the video changed". All "warn".
         """
-        raise NotImplementedError
+        if self._token is None:
+            return None
+        self._token = None
+        return LogLine(_CANCEL_LOG[reason], "warn")
 
     # ── After filling ───────────────────────────────────────────────
 
     @property
     def ai_filled(self) -> bool:
         """True while the box still holds exactly what the finder wrote."""
-        raise NotImplementedError
+        return self._filled_text is not None
 
     @property
     def banner(self) -> str:
         """Banner text to show now, or "" (hidden)."""
-        raise NotImplementedError
+        return self._banner if self.ai_filled else ""
 
     def template_set_by_ai(self, template: str) -> bool:
         """Show TEMPLATE_SET_BY_AI_TEXT by the format field: ai_filled and
         ``template`` still equals FIND_TEMPLATE."""
-        raise NotImplementedError
+        return self.ai_filled and template.strip() == FIND_TEMPLATE
 
     def on_tracklist_edited(self, text: str) -> LogLine | None:
         """Call on every track list text change (user typing or programmatic).
@@ -273,18 +360,28 @@ class TrackFinderSession:
         writing FindApplication.values is safe). Any other change ends
         ai_filled and hides the banner. Returns None unless it cancelled.
         """
-        raise NotImplementedError
+        line = None
+        if self.searching and text.strip():
+            line = self.cancel(CancelReason.EDITED)
+        # Compared stripped: editors may add or drop a trailing newline.
+        if self._filled_text is not None and text.strip() != self._filled_text.strip():
+            self._end_fill()
+        return line
 
     def dismiss_banner(self) -> None:
         """Hide the banner (the ✕). ai_filled and Undo are unaffected."""
-        raise NotImplementedError
+        self._banner = ""
 
     def undo(self) -> FormValues | None:
         """Values from before the fill, or None if nothing can be undone.
 
         Available while ai_filled. Ends ai_filled and hides the banner.
         """
-        raise NotImplementedError
+        if not self.ai_filled:
+            return None
+        values = self._before_fill
+        self._end_fill()
+        return values
 
     def on_video_changed(self) -> tuple[FormValues | None, LogLine | None]:
         """Call when the URL changes or the video is cleared.
@@ -293,7 +390,13 @@ class TrackFinderSession:
         box is still ai_filled, returns the pre-fill values to restore (the
         list belonged to the old video), like undo(); otherwise None.
         """
-        raise NotImplementedError
+        line = self.cancel(CancelReason.VIDEO_CHANGED)
+        return self.undo(), line
+
+    def _end_fill(self) -> None:
+        self._filled_text = None
+        self._before_fill = None
+        self._banner = ""
 
     # ── Hint ────────────────────────────────────────────────────────
 
@@ -305,8 +408,13 @@ class TrackFinderSession:
     ) -> bool:
         """Show API_HINT_TEXT: a video is loaded, the box is blank, there's no
         API model, and the hint wasn't dismissed in this session."""
-        raise NotImplementedError
+        return (
+            info is not None
+            and not tracklist_text.strip()
+            and not has_api_model(settings)
+            and not self._hint_dismissed
+        )
 
     def dismiss_api_hint(self) -> None:
         """Hide the hint for the rest of the session."""
-        raise NotImplementedError
+        self._hint_dismissed = True

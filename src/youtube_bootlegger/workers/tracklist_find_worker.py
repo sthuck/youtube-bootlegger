@@ -5,6 +5,7 @@ from PySide6.QtCore import QObject, QRunnable, Signal
 from ..core.settings import AppSettings
 from ..core.video_info import VideoInfo
 from ..llm.http import PostJson, post_json
+from ..llm.track_finder import TracklistFindError, find_tracklist
 
 
 class TracklistFindSignals(QObject):
@@ -45,4 +46,11 @@ class TracklistFindWorker(QRunnable):
     def run(self) -> None:
         """Emit finished(token, result), or error(token, message) on
         TracklistFindError or any unexpected exception ("Unexpected error: ...")."""
-        raise NotImplementedError
+        try:
+            result = find_tracklist(self._settings, self._info, http_post=self._http_post)
+        except TracklistFindError as exc:
+            self.signals.error.emit(self._token, str(exc))
+        except Exception as exc:
+            self.signals.error.emit(self._token, f"Unexpected error: {exc}")
+        else:
+            self.signals.finished.emit(self._token, result)

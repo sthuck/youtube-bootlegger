@@ -98,20 +98,21 @@ Rules and edge cases:
   URL again makes no AI call. Request comments in the preview only when an
   API model is configured (about +0.3 s), so users without AI don't pay.
 
-## Implementation plan
+## Implementation status
 
-1. **AI find operation** (`llm/`, `app_logic/`): new prompt and schema (below),
-   validation, and rendering the chosen entries as track list text with
-   `DEFAULT_TEMPLATE` (`%songname% - %mm%:%ss%`, total minutes for hour-long
-   videos). Because the app writes the text, the format string is always
-   ours, and the AI never has to guess it.
-2. **Settings and fetch:** the "Find track lists automatically" checkbox in
-   the AI section (on by default; its note says the description and
-   comments are sent to the chosen provider); the preview passes
-   `comment_limit` when an API model is configured.
+1. **Done: AI find operation and shared logic.** `llm/track_finder.py`
+   (`build_track_sources`, `find_tracklist`, `validate_discovery`) with the
+   prompt in `llm/prompt.py`; `app_logic/track_finder.py` for the button
+   mode, auto-run and hint rules, rendering, all UI strings and
+   `TrackFinderSession`; `workers/TracklistFindWorker` for the Qt UIs. The
+   app writes found tracks with `DEFAULT_TEMPLATE` (`%songname% - %mm%:%ss%`,
+   total minutes past an hour), so the AI never chooses the format.
+2. **Done: setting and fetch.** `AppSettings.auto_find_tracklist` (on by
+   default); `preview_comment_limit()` gives the preview's `comment_limit`
+   (comments only with an API model); `VideoInfoWorker` passes it on.
 3. **Front-ends:** button label switching, the searching / filled / hint
-   states, Stop, Undo, log lines, cancellation and the per-video cache, in
-   all three UIs, with the shared logic in `app_logic/`.
+   states, Stop, Undo, log lines and the settings checkbox in all three UIs,
+   wired to `TrackFinderSession`.
 
 Later: a configurable comment count (20 is a starting guess), and telling
 "no comments" apart from "comments failed" in the log.
@@ -146,6 +147,7 @@ Output, for the single best list:
   by choosing a better source. It takes titles and times from **one** source;
   it never invents titles or times, or infers times from order.
 - The app validates: known source ID; each `source_line` is a line of that
-  source and its timestamp equals `start_seconds`; nonempty titles; starts
+  source (whitespace-normalised) and one of its timestamps equals
+  `start_seconds`; nonempty titles; starts
   finite, strictly increasing and below the video duration. A list may start
   after 0:00. On failure, nothing is filled and the reason is logged.

@@ -8,14 +8,18 @@ in its own format, so the AI never chooses the template.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
-from ..core.settings import AppSettings
+from ..core.settings import AppSettings, LlmProvider
 from ..core.video_info import VideoInfo
+from .client import complete_structured
+from .config import endpoint_from_settings
 from .http import LlmError, PostJson, post_json
+from .prompt import FIND_SYSTEM_PROMPT, build_find_prompt
 
 SCHEMA_NAME = "tracklist_discovery"
 
@@ -23,6 +27,11 @@ SCHEMA_NAME = "tracklist_discovery"
 # leading whole lines; sources past the total budget are dropped, last first.
 MAX_SOURCE_CHARS = 8_000
 MAX_TOTAL_SOURCE_CHARS = 40_000
+
+NEEDS_API_MODEL_ERROR = "Finding a track list needs an API model, not ChatGPT Lite."
+
+# M:SS, MM:SS, MMM:SS or H:MM:SS, not inside a longer run of digits.
+_TIMESTAMP_RE = re.compile(r"(?<![\d:])(?:(\d{1,2}):)?(\d{1,3}):(\d{2})(?![\d:])")
 
 
 class TracklistFindError(LlmError):
@@ -112,7 +121,57 @@ def build_track_sources(info: VideoInfo) -> tuple[TrackSource, ...]:
     Order: description, chapters, then comments in YouTube's order. A video
     with no description, chapters or comments yields ().
     """
-    raise NotImplementedError
+    candidates = [("description", "the description", info.description)]
+    if info.chapters:
+        chapter_lines = (
+            f"{format_timestamp(int(chapter.start_seconds))} {_one_line(chapter.title)}"
+            for chapter in info.chapters
+        )
+        candidates.append(("chapters", "the chapters", "\n".join(chapter_lines)))
+    candidates += [
+        (f"comment:{n}", f"comment #{n}", comment.text)
+        for n, comment in enumerate(info.comments, start=1)
+    ]
+
+    sources = []
+    total = 0
+    for source_id, label, text in candidates:
+        text = _truncate_lines(text.strip(), MAX_SOURCE_CHARS)
+        if not text:
+            continue
+        if total + len(text) > MAX_TOTAL_SOURCE_CHARS:
+            break
+        total += len(text)
+        sources.append(TrackSource(source_id, label, text))
+    return tuple(sources)
+
+
+def format_timestamp(seconds: int) -> str:
+    """``M:SS``, or ``H:MM:SS`` from one hour."""
+    hours, rest = divmod(seconds, 3600)
+    minutes, secs = divmod(rest, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes}:{secs:02d}"
+
+
+def _one_line(text: str) -> str:
+    return " ".join(text.split())
+
+
+def _truncate_lines(text: str, limit: int) -> str:
+    """Keep the leading whole lines of ``text`` that fit in ``limit`` characters."""
+    if len(text) <= limit:
+        return text
+    kept = []
+    size = 0
+    for line in text.splitlines():
+        size += len(line) + (1 if kept else 0)
+        if size > limit:
+            break
+        kept.append(line)
+    # A single line longer than the limit is cut rather than dropped.
+    return "\n".join(kept) if kept else text[:limit]
 
 
 def find_tracklist(
@@ -131,7 +190,29 @@ def find_tracklist(
             ChatGPT Lite), the request fails, or the response is invalid
             (see validate_discovery).
     """
-    raise NotImplementedError
+    if settings.llm_provider == LlmProvider.CHATGPT_LITE:
+        raise TracklistFindError(NEEDS_API_MODEL_ERROR)
+    try:
+        endpoint = endpoint_from_settings(settings)
+    except LlmError as exc:
+        raise TracklistFindError(str(exc)) from exc
+
+    sources = build_track_sources(info)
+    if not sources:
+        return TracklistFindResult(FindOutcome.NOT_FOUND)
+
+    try:
+        response = complete_structured(
+            endpoint,
+            system=FIND_SYSTEM_PROMPT,
+            user=build_find_prompt(info.title, info.duration, sources),
+            output=TracklistDiscovery,
+            schema_name=SCHEMA_NAME,
+            http_post=http_post,
+        )
+    except LlmError as exc:
+        raise TracklistFindError(str(exc)) from exc
+    return validate_discovery(response, sources, info.duration)
 
 
 def validate_discovery(
@@ -155,4 +236,55 @@ def validate_discovery(
         TracklistFindError: With a short reason, if a FOUND response breaks
             any rule (e.g. "AI returned a line that isn't in comment #3").
     """
-    raise NotImplementedError
+    by_id = {source.source_id: source for source in sources}
+    artist = response.artist_name.strip()
+    album = response.album_name.strip()
+    source_id = response.source_id.strip()
+
+    if not source_id and not response.entries:
+        untimed = by_id.get(response.untimed_source_id.strip())
+        if untimed is None:
+            return TracklistFindResult(FindOutcome.NOT_FOUND, artist_name=artist, album_name=album)
+        return TracklistFindResult(
+            FindOutcome.UNTIMED, untimed, artist_name=artist, album_name=album,
+        )
+
+    source = by_id.get(source_id)
+    if source is None:
+        raise TracklistFindError(f"AI returned an unknown source: {source_id!r}")
+    if not response.entries:
+        raise TracklistFindError(f"AI returned no tracks from {source.label}")
+
+    lines = {_one_line(line) for line in source.text.splitlines()}
+    tracks = []
+    for entry in response.entries:
+        line = _one_line(entry.source_line)
+        if line not in lines:
+            raise TracklistFindError(f"AI returned a line that isn't in {source.label}: {line!r}")
+        if entry.start_seconds not in _line_timestamps(line):
+            raise TracklistFindError(
+                f"AI returned a start time that doesn't match its line in {source.label}: {line!r}"
+            )
+        title = _one_line(entry.title)
+        if not title:
+            raise TracklistFindError(f"AI returned a track without a title: {line!r}")
+        if tracks and entry.start_seconds <= tracks[-1].start_seconds:
+            raise TracklistFindError("AI returned track start times that don't increase")
+        if duration_seconds > 0 and entry.start_seconds >= duration_seconds:
+            raise TracklistFindError(f"AI returned a track starting after the video ends: {line!r}")
+        tracks.append(FoundTrack(title, entry.start_seconds))
+
+    return TracklistFindResult(
+        FindOutcome.FOUND, source, tuple(tracks), artist_name=artist, album_name=album,
+    )
+
+
+def _line_timestamps(line: str) -> set[int]:
+    """Every valid timestamp in ``line``, in seconds."""
+    found = set()
+    for match in _TIMESTAMP_RE.finditer(line):
+        hours, minutes, seconds = match.groups()
+        if int(seconds) >= 60 or (hours is not None and int(minutes) >= 60):
+            continue
+        found.add(int(hours or 0) * 3600 + int(minutes) * 60 + int(seconds))
+    return found

@@ -170,3 +170,18 @@ class TestLlmSettingsRoundTrip:
         backend.setValue("llm/provider", "not-a-provider")
         settings = AppSettings(backend)
         assert settings.llm_provider == LlmProvider.CHATGPT_LITE
+
+
+class TestAutoFindTracklistSetting:
+    def test_defaults_to_true(self):
+        assert AppSettings(FakeSettingsBackend()).auto_find_tracklist is True
+
+    def test_round_trip(self):
+        settings = AppSettings(FakeSettingsBackend())
+        settings.auto_find_tracklist = False
+        assert settings.auto_find_tracklist is False
+
+    def test_accepts_string_bool_from_backend(self):
+        backend = FakeSettingsBackend()
+        backend.setValue("llm/auto_find_tracklist", "false")
+        assert AppSettings(backend).auto_find_tracklist is False

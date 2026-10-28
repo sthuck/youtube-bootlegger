@@ -204,11 +204,11 @@ class AppSettings:
         Defaults to True. Only takes effect with an API model (not ChatGPT
         Lite); the "Find with AI" button works regardless of this setting.
         """
-        raise NotImplementedError
+        return _to_bool(self._backend.value(_AUTO_FIND_TRACKLIST_KEY, True))
 
     @auto_find_tracklist.setter
     def auto_find_tracklist(self, enabled: bool) -> None:
-        raise NotImplementedError
+        self._backend.setValue(_AUTO_FIND_TRACKLIST_KEY, bool(enabled))
 
     def sync(self) -> None:
         """Flush settings to persistent storage."""
