@@ -10,7 +10,14 @@ from textual.widgets import Button, Input, Static, TextArea
 from src.youtube_bootlegger.core.exceptions import DownloadError, ValidationError
 from src.youtube_bootlegger.core.settings import AppSettings, LlmProvider
 from src.youtube_bootlegger.core.video_info import VideoInfo
-from src.youtube_bootlegger.llm import TracklistExtraction
+from src.youtube_bootlegger.llm import (
+    FindOutcome,
+    FoundTrack,
+    TrackSource,
+    TracklistExtraction,
+    TracklistFindError,
+    TracklistFindResult,
+)
 from src.youtube_bootlegger.tui import BootleggerApp
 from src.youtube_bootlegger.tui import app as app_module
 from src.youtube_bootlegger.tui.screens import (
@@ -20,7 +27,7 @@ from src.youtube_bootlegger.tui.screens import (
     SettingsScreen,
 )
 from src.youtube_bootlegger.tui.screens.help import build_help_markdown
-from src.youtube_bootlegger.tui.widgets import TrackPreviewTable
+from src.youtube_bootlegger.tui.widgets import StatusLog, TrackPreviewTable
 
 VALID_URL = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 SIZE = (140, 45)
@@ -100,12 +107,21 @@ def fake_pipeline(monkeypatch):
     return FakePipeline
 
 
+class FetchCalls(list):
+    """URLs fetched, plus the comment_limit each fetch was given."""
+
+    def __init__(self):
+        super().__init__()
+        self.comment_limits = []
+
+
 @pytest.fixture
 def fake_video(monkeypatch):
-    calls = []
+    calls = FetchCalls()
 
-    def fetch(url, settings=None):
+    def fetch(url, settings=None, comment_limit=0):
         calls.append(url)
+        calls.comment_limits.append(comment_limit)
         return make_video()
 
     monkeypatch.setattr(app_module, "fetch_video_info", fetch)
@@ -164,7 +180,7 @@ class TestVideoInfo:
             assert app._video_info is None
 
     async def test_fetch_error_is_shown(self, settings, fake_video, monkeypatch):
-        def failing_fetch(url, settings=None):
+        def failing_fetch(url, settings=None, comment_limit=0):
             raise ValidationError("Video unavailable")
 
         monkeypatch.setattr(app_module, "fetch_video_info", failing_fetch)
@@ -355,6 +371,259 @@ class TestAiAssist:
             assert "Live at the Venue" in copied[-1]
 
 
+COMMENT_SOURCE = TrackSource("comment:3", "comment #3", "0:00 Intro\n4:05 Song")
+FOUND = TracklistFindResult(
+    FindOutcome.FOUND,
+    COMMENT_SOURCE,
+    (FoundTrack("Intro", 0), FoundTrack("Song", 245)),
+    artist_name="AI Band",
+    album_name="AI Album",
+)
+FOUND_TEXT = "Intro - 0:00\nSong - 4:05"
+
+
+class FakeFind:
+    """Stands in for find_tracklist; optionally blocks until released."""
+
+    def __init__(self):
+        self.calls = []
+        self.result: object = FOUND
+        self.gate: threading.Event | None = None
+
+    def __call__(self, settings, info, **kwargs):
+        self.calls.append(info.video_id)
+        if self.gate is not None:
+            self.gate.wait(timeout=5)
+        if isinstance(self.result, Exception):
+            raise self.result
+        return self.result
+
+
+@pytest.fixture
+def api_settings(settings):
+    settings.llm_provider = LlmProvider.OPENAI
+    settings.openai_api_key = "sk-test"
+    return settings
+
+
+@pytest.fixture
+def fake_find(monkeypatch):
+    find = FakeFind()
+    monkeypatch.setattr(app_module, "find_tracklist", find)
+    yield find
+    if find.gate is not None:
+        find.gate.set()  # Never leave a daemon thread blocked.
+
+
+def log_text(app) -> str:
+    return "\n".join(line.text for line in app.query_one(StatusLog).lines)
+
+
+def tracklist(app) -> str:
+    return app.query_one("#tracklist", TextArea).text
+
+
+def ai_label(app) -> str:
+    return str(app.query_one("#ai-assist", Button).label)
+
+
+class TestTrackFinder:
+    async def test_auto_find_fills_form_banner_and_log(self, api_settings, fake_video, fake_find):
+        app = make_app(api_settings)
+        async with app.run_test(size=SIZE) as pilot:
+            assert ai_label(app) == "✦ Find with AI"
+            await load_video(app, pilot)
+            await wait_for(pilot, lambda: tracklist(app) == FOUND_TEXT)
+            await pilot.pause()
+            assert fake_video.comment_limits == [20]
+            assert app.query_one("#template", Input).value == "%songname% - %mm%:%ss%"
+            assert app.query_one("#artist", Input).value == "AI Band"
+            assert app.query_one("#album", Input).value == "AI Album"
+            assert app.query_one("#find-row").display is True
+            assert "Filled by AI from comment #3: 2 tracks" in static_text(app, "#find-text")
+            assert app.query_one("#find-undo").display is True
+            assert app.query_one("#template-ai-marker").display is True
+            assert ai_label(app) == "✦ Detect format"
+            log = log_text(app)
+            assert "Video info: no description, 0 chapters, 0 comments" in log
+            assert "AI: found 2 timestamped tracks in comment #3" in log
+            assert 'AI: format set to "%songname% - %mm%:%ss%"' in log
+            assert app.query_one(TrackPreviewTable).row_count == 2
+
+    async def test_untimed_list_leaves_box_empty_and_logs(
+        self, api_settings, fake_video, fake_find
+    ):
+        fake_find.result = TracklistFindResult(
+            FindOutcome.UNTIMED, TrackSource("description", "the description", "Intro\nSong")
+        )
+        app = make_app(api_settings)
+        async with app.run_test(size=SIZE) as pilot:
+            await load_video(app, pilot)
+            await wait_for(pilot, lambda: "without timestamps" in log_text(app))
+            assert tracklist(app) == ""
+            assert app.query_one("#find-row").display is False
+            assert "found song names without timestamps in the description" in log_text(app)
+
+    async def test_stop_discards_the_result(self, api_settings, fake_video, fake_find):
+        fake_find.gate = threading.Event()
+        app = make_app(api_settings)
+        async with app.run_test(size=SIZE) as pilot:
+            await load_video(app, pilot)
+            await wait_for(pilot, lambda: fake_find.calls)
+            await pilot.pause()
+            assert "Looking for a track list" in static_text(app, "#find-text")
+            assert app.query_one("#ai-assist", Button).disabled is True
+            await pilot.click("#find-stop")
+            fake_find.gate.set()
+            await pilot.pause(0.1)
+            assert tracklist(app) == ""
+            assert app.query_one("#find-row").display is False
+            assert "AI: search stopped" in log_text(app)
+            assert app.query_one("#ai-assist", Button).disabled is False
+
+    async def test_typing_during_search_keeps_user_text(
+        self, api_settings, fake_video, fake_find
+    ):
+        fake_find.gate = threading.Event()
+        app = make_app(api_settings)
+        async with app.run_test(size=SIZE) as pilot:
+            await load_video(app, pilot)
+            await wait_for(pilot, lambda: fake_find.calls)
+            app.query_one("#tracklist", TextArea).text = "Mine - 0:00"
+            await pilot.pause()
+            fake_find.gate.set()
+            await pilot.pause(0.1)
+            assert tracklist(app) == "Mine - 0:00"
+            assert "search stopped because you edited the track list" in log_text(app)
+            assert app.query_one("#artist", Input).value == ""
+
+    async def test_url_change_clears_unedited_fill(self, api_settings, fake_video, fake_find):
+        app = make_app(api_settings)
+        async with app.run_test(size=SIZE) as pilot:
+            await load_video(app, pilot)
+            await wait_for(pilot, lambda: tracklist(app) == FOUND_TEXT)
+            app.query_one("#url", Input).value = "not a url"
+            await pilot.pause()
+            assert tracklist(app) == ""
+            assert app.query_one("#artist", Input).value == ""
+            assert app.query_one("#find-row").display is False
+
+    async def test_url_change_keeps_edited_fill(self, api_settings, fake_video, fake_find):
+        app = make_app(api_settings)
+        async with app.run_test(size=SIZE) as pilot:
+            await load_video(app, pilot)
+            await wait_for(pilot, lambda: tracklist(app) == FOUND_TEXT)
+            app.query_one("#tracklist", TextArea).text = FOUND_TEXT + "\nEncore - 9:00"
+            await pilot.pause()
+            assert app.query_one("#find-row").display is False  # Edited: banner gone.
+            app.query_one("#url", Input).value = "not a url"
+            await pilot.pause()
+            assert tracklist(app).endswith("Encore - 9:00")
+
+    async def test_undo_restores_previous_values(self, api_settings, fake_video, fake_find):
+        app = make_app(api_settings)
+        async with app.run_test(size=SIZE) as pilot:
+            app.query_one("#artist", Input).value = "My Band"
+            await load_video(app, pilot)
+            await wait_for(pilot, lambda: tracklist(app) == FOUND_TEXT)
+            assert app.query_one("#artist", Input).value == "My Band"  # Not overwritten.
+            await pilot.click("#find-undo")
+            await pilot.pause()
+            assert tracklist(app) == ""
+            assert app.query_one("#album", Input).value == ""
+            assert app.query_one("#artist", Input).value == "My Band"
+            assert app.query_one("#find-row").display is False
+            assert app.query_one("#template-ai-marker").display is False
+
+    async def test_reloading_same_video_uses_cache(self, api_settings, fake_video, fake_find):
+        app = make_app(api_settings)
+        async with app.run_test(size=SIZE) as pilot:
+            await load_video(app, pilot)
+            await wait_for(pilot, lambda: tracklist(app) == FOUND_TEXT)
+            app.query_one("#url", Input).value = "not a url"
+            await pilot.pause()
+            await load_video(app, pilot)
+            await wait_for(pilot, lambda: tracklist(app) == FOUND_TEXT)
+            assert fake_find.calls == ["dQw4w9WgXcQ"]
+
+    async def test_lite_shows_hint_and_never_finds(self, settings, fake_video, fake_find):
+        app = make_app(settings)  # Default provider: ChatGPT Lite.
+        async with app.run_test(size=SIZE) as pilot:
+            await load_video(app, pilot)
+            await pilot.pause()
+            assert fake_video.comment_limits == [0]
+            assert "needs an API model" in static_text(app, "#find-text")
+            assert app.query_one("#find-open-settings").display is True
+            await pilot.click("#find-open-settings")
+            await pilot.pause()
+            assert isinstance(app.screen, SettingsScreen)
+            await pilot.press("escape")
+            await pilot.pause()
+            await pilot.click("#find-dismiss")
+            await pilot.pause()
+            assert app.query_one("#find-row").display is False
+            await pilot.press("f3")  # Find mode without an API model explains itself.
+            await pilot.pause()
+            assert fake_find.calls == []
+
+    async def test_checkbox_off_waits_for_click(self, api_settings, fake_video, fake_find):
+        api_settings.auto_find_tracklist = False
+        app = make_app(api_settings)
+        async with app.run_test(size=SIZE) as pilot:
+            await load_video(app, pilot)
+            await pilot.pause(0.1)
+            assert fake_find.calls == []
+            assert app.query_one("#find-row").display is False
+            await pilot.press("f3")
+            await wait_for(pilot, lambda: tracklist(app) == FOUND_TEXT)
+            assert fake_find.calls == ["dQw4w9WgXcQ"]
+
+    async def test_auto_find_error_only_logs(self, api_settings, fake_video, fake_find):
+        fake_find.result = TracklistFindError("provider down")
+        app = make_app(api_settings)
+        async with app.run_test(size=SIZE) as pilot:
+            await load_video(app, pilot)
+            await wait_for(pilot, lambda: "provider down" in log_text(app))
+            assert "AI: couldn't find a track list: provider down" in log_text(app)
+            assert tracklist(app) == ""
+            assert app.query_one("#ai-assist", Button).disabled is False
+
+    async def test_detect_format_still_used_for_filled_box(
+        self, api_settings, fake_video, fake_find, monkeypatch
+    ):
+        api_settings.auto_find_tracklist = False
+        monkeypatch.setattr(
+            app_module,
+            "extract_tracklist_metadata",
+            lambda s, title, text: TracklistExtraction(
+                template="%mm%:%ss% %songname%", artist_name="", album_name=""
+            ),
+        )
+        app = make_app(api_settings)
+        async with app.run_test(size=SIZE) as pilot:
+            await load_video(app, pilot)
+            app.query_one("#tracklist", TextArea).text = "0:00 Intro"
+            await pilot.pause()
+            assert ai_label(app) == "✦ Detect format"
+            await pilot.press("f3")
+            await wait_for(
+                pilot, lambda: app.query_one("#template", Input).value == "%mm%:%ss% %songname%"
+            )
+            assert fake_find.calls == []
+
+    async def test_settings_switch_persists(self, api_settings, fake_video):
+        app = make_app(api_settings)
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.press("f2")
+            screen = app.screen
+            switch = screen.query_one("#setting-auto-find-tracklist")
+            assert switch.value is True
+            switch.value = False
+            await pilot.click("#settings-save")
+            await pilot.pause()
+            assert api_settings.auto_find_tracklist is False
+
+
 class TestDialogs:
     async def test_help_opens_and_closes(self, settings, fake_video):
         app = make_app(settings)
@@ -423,7 +692,7 @@ class TestUntrustedText:
         monkeypatch.setattr(
             app_module,
             "fetch_video_info",
-            lambda url, settings=None: make_video(title="Live [Full Concert] [/x]"),
+            lambda url, settings=None, comment_limit=0: make_video(title="Live [Full Concert] [/x]"),
         )
         app = make_app(settings)
         async with app.run_test(size=SIZE) as pilot:
@@ -431,7 +700,7 @@ class TestUntrustedText:
             await pilot.pause()
             assert static_text(app, "#video-title") == "Live [Full Concert] [/x]"
 
-            def failing_fetch(url, settings=None):
+            def failing_fetch(url, settings=None, comment_limit=0):
                 raise ValidationError("ERROR: [youtube] abc: [/oops]")
 
             monkeypatch.setattr(app_module, "fetch_video_info", failing_fetch)

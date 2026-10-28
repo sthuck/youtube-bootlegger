@@ -169,17 +169,19 @@ def render_tracklist(tracks: tuple[FoundTrack, ...]) -> str:
     )
 
 
-def video_sources_log_line(info: VideoInfo) -> LogLine:
+def video_sources_log_line(info: VideoInfo, settings: AppSettings) -> LogLine:
     """Logged when a video loads, e.g. "Video info: description, 13 chapters, 20 comments".
 
     Parts: "description" or "no description"; "N chapter(s)"; "N comment(s)"
-    (singular for 1, e.g. "1 chapter").
+    (singular for 1, e.g. "1 chapter"). The comment count is left out when
+    the preview didn't request comments, so "0 comments" is never misleading.
     """
     parts = [
         "description" if info.description.strip() else "no description",
         _count(len(info.chapters), "chapter"),
-        _count(len(info.comments), "comment"),
     ]
+    if preview_comment_limit(settings):
+        parts.append(_count(len(info.comments), "comment"))
     return LogLine("Video info: " + ", ".join(parts))
 
 

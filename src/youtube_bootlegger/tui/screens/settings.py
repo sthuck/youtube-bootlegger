@@ -8,6 +8,7 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, Select, Static, Switch
 
+from ...app_logic.track_finder import AUTO_FIND_SETTING_LABEL, AUTO_FIND_SETTING_NOTE
 from ...core.settings import AppSettings, LlmProvider
 from ...llm import (
     DEFAULT_ANTHROPIC_MODEL,
@@ -119,6 +120,10 @@ class SettingsScreen(ModalScreen[bool]):
                     with Vertical(id=f"provider-{provider.value}", classes="provider-fields"):
                         for field in fields:
                             yield from _field_widgets(field, s)
+                with Horizontal(classes="switch-row"):
+                    yield Switch(s.auto_find_tracklist, id="setting-auto-find-tracklist")
+                    yield Label(AUTO_FIND_SETTING_LABEL)
+                yield Static(AUTO_FIND_SETTING_NOTE, classes="muted")
             with Horizontal(classes="dialog-buttons"):
                 yield Button("Cancel", id="settings-cancel")
                 yield Button("Save", variant="primary", id="settings-save")
@@ -146,6 +151,7 @@ class SettingsScreen(ModalScreen[bool]):
         s = self._settings
         s.use_external_ytdlp = self.query_one("#setting-use-external-ytdlp", Switch).value
         s.llm_provider = self.query_one("#setting-llm-provider", Select).value
+        s.auto_find_tracklist = self.query_one("#setting-auto-find-tracklist", Switch).value
         all_fields = TOOL_FIELDS + tuple(f for fs in PROVIDER_FIELDS.values() for f in fs)
         for field in all_fields:
             setattr(s, field.attr, self.query_one(f"#{_input_id(field)}", Input).value)

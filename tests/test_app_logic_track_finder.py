@@ -113,12 +113,16 @@ class TestVideoSourcesLogLine:
             chapters=(VideoChapter("a", 0), VideoChapter("b", 5)),
             comments=(VideoComment("c", "t"),),
         )
-        assert video_sources_log_line(info) == LogLine(
+        assert video_sources_log_line(info, api_settings()) == LogLine(
             "Video info: description, 2 chapters, 1 comment")
 
     def test_empty(self):
-        assert video_sources_log_line(make_video()).text == (
+        assert video_sources_log_line(make_video(), api_settings()).text == (
             "Video info: no description, 0 chapters, 0 comments")
+
+    def test_omits_comments_when_not_requested(self):
+        assert video_sources_log_line(make_video(), lite_settings()).text == (
+            "Video info: no description, 0 chapters")
 
 
 def filled_session() -> tuple[TrackFinderSession, FormValues]:

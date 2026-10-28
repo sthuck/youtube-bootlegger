@@ -16,6 +16,13 @@ from PySide6.QtWidgets import QApplication
 from src.youtube_bootlegger.app_qml import create_qml_engine
 from src.youtube_bootlegger.core.exceptions import ValidationError
 from src.youtube_bootlegger.core.video_info import VideoInfo
+from src.youtube_bootlegger.llm.track_finder import (
+    FindOutcome,
+    FoundTrack,
+    TrackSource,
+    TracklistFindError,
+    TracklistFindResult,
+)
 from src.youtube_bootlegger.qml_backend import AppBackend
 
 VALID_URL = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
@@ -133,6 +140,65 @@ class GatedFetch:
     def release_all(self) -> None:
         for call in self.calls:
             call.succeed("released")
+
+
+NOT_FOUND = TracklistFindResult(FindOutcome.NOT_FOUND)
+
+
+def found_result(
+    tracks=(("Intro", 0), ("Song Two", 245)),
+    label="comment #3",
+    artist="AI Band",
+    album="AI Album",
+) -> TracklistFindResult:
+    return TracklistFindResult(
+        FindOutcome.FOUND,
+        TrackSource("comment:3", label, "set list"),
+        tuple(FoundTrack(title, start) for title, start in tracks),
+        artist,
+        album,
+    )
+
+
+def untimed_result(label="the description") -> TracklistFindResult:
+    return TracklistFindResult(FindOutcome.UNTIMED, TrackSource("description", label, "songs"))
+
+
+class FakeFind:
+    """find_tracklist replacement: records calls, returns ``result``.
+
+    Defaults to NOT_FOUND, so no test ever reaches a real AI provider. Set
+    ``gate`` to an Event to hold calls until the test sets it, or ``error``
+    to make calls fail.
+    """
+
+    def __init__(self):
+        self.calls: list[VideoInfo] = []
+        self.result: TracklistFindResult = NOT_FOUND
+        self.error = ""
+        self.gate: threading.Event | None = None
+
+    def __call__(self, settings, info, *, http_post=None):
+        self.calls.append(info)
+        if self.gate is not None:
+            self.gate.wait(timeout=5)
+        if self.error:
+            raise TracklistFindError(self.error)
+        return self.result
+
+    def release(self) -> None:
+        if self.gate is not None:
+            self.gate.set()
+
+
+def use_api_model(backend: AppBackend) -> None:
+    """Configure an API provider, so the finder may run automatically."""
+    backend.setLlmProvider("openai")
+    backend.setOpenaiApiKey("sk-test-key")
+
+
+def log_messages(backend: AppBackend) -> list[str]:
+    return [item["message"] for item in backend.statusLogModel._items]
 
 
 @contextmanager

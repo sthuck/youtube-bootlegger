@@ -180,6 +180,7 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 colors: _c
+                onOpenSettingsRequested: settingsPanel.open = true
             }
         }
 

@@ -11,13 +11,32 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..app_logic import (
+    AiButtonMode,
+    CancelReason,
+    FormValues,
+    LogLine,
+    TrackFinderSession,
+    ai_button_label,
+    ai_button_mode,
+    check_find_ready,
+    preview_comment_limit,
+    should_auto_find,
+    video_sources_log_line,
+)
 from ..core import parse_tracklist_with_template
+from ..core.video_info import VideoInfo
 from ..llm import is_llm_configured, launch_chatgpt_lite_assist
 from ..core.settings import LlmProvider, get_settings
 from ..models import DownloadJob
 from ..utils import is_ffmpeg_available, is_valid_youtube_url
 from ..resources import APP_LOGO_PNG
-from ..workers import PipelineWorker, TracklistAiWorker, VideoInfoWorker
+from ..workers import (
+    PipelineWorker,
+    TracklistAiWorker,
+    TracklistFindWorker,
+    VideoInfoWorker,
+)
 from .widgets import (
     DirectoryPickerWidget,
     MetadataInputWidget,
@@ -41,6 +60,10 @@ class MainWindow(QMainWindow):
         self._video_info_worker: VideoInfoWorker | None = None
         self._tracklist_ai_worker: TracklistAiWorker | None = None
         self._ai_analyzing = False
+        self._finder = TrackFinderSession()
+        self._find_worker: TracklistFindWorker | None = None
+        self._find_video_id = ""
+        self._find_manual = False
         self._url_debounce_timer = QTimer()
         self._url_debounce_timer.setSingleShot(True)
         self._url_debounce_timer.timeout.connect(self._fetch_video_info)
@@ -123,19 +146,142 @@ class MainWindow(QMainWindow):
             self._update_ai_availability()
 
     def _update_ai_availability(self) -> None:
-        """Enable the AI button when inputs and LLM settings are ready."""
-        has_tracklist = bool(self._tracklist_input.get_text().strip())
-        has_video = self._video_preview.get_video_info() is not None
-        configured = is_llm_configured(get_settings())
-        self._tracklist_input.set_ai_available(
-            has_tracklist and has_video and configured and not self._ai_analyzing
+        """Refresh the AI button and the finder rows from the current state.
+
+        The button finds a track list when the box is empty and detects the
+        format otherwise; detecting still needs a configured LLM, finding
+        explains on click what's missing.
+        """
+        settings = get_settings()
+        tracklist = self._tracklist_input.get_text()
+        info = self._video_preview.get_video_info()
+        mode = ai_button_mode(tracklist)
+        idle = not self._ai_analyzing and not self._finder.searching
+        ready = mode == AiButtonMode.FIND or is_llm_configured(settings)
+
+        self._tracklist_input.set_ai_button_label(ai_button_label(mode))
+        self._tracklist_input.set_ai_available(info is not None and idle and ready)
+        self._tracklist_input.set_find_state(
+            self._finder.searching,
+            self._finder.banner,
+            self._finder.show_api_hint(settings, info, tracklist),
+        )
+        self._tracklist_input.set_template_set_by_ai(
+            self._finder.template_set_by_ai(self._tracklist_input.get_template())
         )
 
     def _on_ai_requested(self) -> None:
-        """Run LLM analysis on the raw track list."""
-        if self._ai_analyzing:
+        """Find a track list (empty box) or detect its format (filled box)."""
+        if self._ai_analyzing or self._finder.searching:
+            return
+        if ai_button_mode(self._tracklist_input.get_text()) == AiButtonMode.FIND:
+            self._on_find_requested()
+        else:
+            self._detect_format()
+
+    def _on_find_requested(self) -> None:
+        """Handle a "Find with AI" click."""
+        info = self._video_preview.get_video_info()
+        problem = check_find_ready(info, get_settings())
+        if problem:
+            QMessageBox.warning(self, "AI Assist", problem)
+            return
+        self._start_find(info, manual=True)
+
+    def _start_find(self, info: VideoInfo, *, manual: bool) -> None:
+        """Search for a track list in the video, or reuse this session's result."""
+        token = self._finder.begin(info.video_id)
+        self._find_video_id = info.video_id
+        self._find_manual = manual
+
+        cached = self._finder.cached(info.video_id)
+        if cached is not None:
+            self._on_find_finished(token, cached)
             return
 
+        worker = TracklistFindWorker(get_settings(), info, token)
+        worker.signals.finished.connect(self._on_find_finished)
+        worker.signals.error.connect(self._on_find_error)
+        self._find_worker = worker
+        self._thread_pool.start(worker)
+        self._update_ai_availability()
+
+    def _on_find_finished(self, token: int, result) -> None:
+        """Apply a finished search, unless it was stopped or superseded."""
+        application = self._finder.complete(
+            token, self._find_video_id, result, self._form_values()
+        )
+        if application is None:
+            return
+        if application.values is not None:
+            self._write_form_values(application.values)
+        for line in application.log:
+            self._log(line)
+        self._update_ai_availability()
+
+    def _on_find_error(self, token: int, message: str) -> None:
+        """Log a failed search; a manual click also shows the message."""
+        line = self._finder.fail(token, message)
+        if line is None:
+            return
+        self._log(line)
+        self._update_ai_availability()
+        if self._find_manual:
+            QMessageBox.critical(self, "AI Assist", message)
+
+    def _on_stop_find(self) -> None:
+        """Stop the running search; its result will be discarded."""
+        self._log(self._finder.cancel(CancelReason.STOPPED))
+        self._update_ai_availability()
+
+    def _on_undo_find(self) -> None:
+        """Restore the form as it was before the AI filled it."""
+        values = self._finder.undo()
+        if values is not None:
+            self._write_form_values(values)
+        self._update_ai_availability()
+
+    def _on_find_banner_dismissed(self) -> None:
+        self._finder.dismiss_banner()
+        self._update_ai_availability()
+
+    def _on_api_hint_dismissed(self) -> None:
+        self._finder.dismiss_api_hint()
+        self._update_ai_availability()
+
+    def _on_tracklist_changed(self) -> None:
+        """Typing during a search stops it; editing an AI fill ends the banner."""
+        self._log(self._finder.on_tracklist_edited(self._tracklist_input.get_text()))
+        self._update_ai_availability()
+
+    def _on_video_changed(self) -> None:
+        """Cancel a search and clear an unedited AI fill; it was for the old video."""
+        values, line = self._finder.on_video_changed()
+        self._log(line)
+        if values is not None:
+            self._write_form_values(values)
+
+    def _form_values(self) -> FormValues:
+        return FormValues(
+            tracklist=self._tracklist_input.get_text(),
+            template=self._tracklist_input.get_template(),
+            artist=self._metadata_input.get_artist(),
+            album=self._metadata_input.get_album(),
+        )
+
+    def _write_form_values(self, values: FormValues) -> None:
+        # Template first, so the track list preview parses with the right one.
+        self._tracklist_input.set_template(values.template)
+        self._tracklist_input.set_text(values.tracklist)
+        self._metadata_input.set_artist(values.artist)
+        self._metadata_input.set_album(values.album)
+
+    def _log(self, line: LogLine | None) -> None:
+        if line is not None:
+            self._progress_panel.add_message(line.text, line.level)
+
+    def _detect_format(self) -> None:
+        """Run LLM analysis on the raw track list."""
         video_info = self._video_preview.get_video_info()
         if video_info is None:
             QMessageBox.warning(
@@ -205,8 +351,14 @@ class MainWindow(QMainWindow):
         self._start_button.clicked.connect(self._on_start_clicked)
         self._cancel_button.clicked.connect(self._on_cancel_clicked)
         self._url_input.url_changed.connect(self._on_url_changed)
-        self._tracklist_input.tracklist_changed.connect(self._update_ai_availability)
+        self._tracklist_input.tracklist_changed.connect(self._on_tracklist_changed)
+        self._tracklist_input.template_changed.connect(self._update_ai_availability)
         self._tracklist_input.ai_requested.connect(self._on_ai_requested)
+        self._tracklist_input.stop_find_requested.connect(self._on_stop_find)
+        self._tracklist_input.undo_find_requested.connect(self._on_undo_find)
+        self._tracklist_input.find_banner_dismissed.connect(self._on_find_banner_dismissed)
+        self._tracklist_input.open_settings_requested.connect(self._open_settings_dialog)
+        self._tracklist_input.api_hint_dismissed.connect(self._on_api_hint_dismissed)
         self._update_ai_availability()
 
     def _check_ffmpeg(self) -> None:
@@ -227,6 +379,9 @@ class MainWindow(QMainWindow):
     def _on_url_changed(self, url: str) -> None:
         """Handle URL input changes with debouncing."""
         self._url_debounce_timer.stop()
+
+        if url != self._last_fetched_url:
+            self._on_video_changed()
 
         if not url:
             self._video_preview.clear()
@@ -257,18 +412,31 @@ class MainWindow(QMainWindow):
         self._last_fetched_url = url
         self._video_preview.set_loading()
 
-        self._video_info_worker = VideoInfoWorker(url)
-        self._video_info_worker.signals.finished.connect(self._on_video_info_loaded)
-        self._video_info_worker.signals.error.connect(self._on_video_info_error)
+        worker = VideoInfoWorker(
+            url, comment_limit=preview_comment_limit(get_settings())
+        )
+        # Ignore results from a fetch that a newer URL has replaced.
+        worker.signals.finished.connect(
+            lambda info: self._on_video_info_loaded(info)
+            if worker is self._video_info_worker else None
+        )
+        worker.signals.error.connect(
+            lambda message: self._on_video_info_error(message)
+            if worker is self._video_info_worker else None
+        )
+        self._video_info_worker = worker
 
-        self._thread_pool.start(self._video_info_worker)
+        self._thread_pool.start(worker)
 
     def _on_video_info_loaded(self, info) -> None:
-        """Handle successful video info fetch."""
+        """Handle successful video info fetch; may start finding a track list."""
         self._video_preview.set_video_info(info)
         # Set default album name to video title
         self._metadata_input.set_album_placeholder(info.title)
+        self._log(video_sources_log_line(info, get_settings()))
         self._update_ai_availability()
+        if should_auto_find(get_settings(), info, self._tracklist_input.get_text()):
+            self._start_find(info, manual=False)
 
     def _on_video_info_error(self, message: str) -> None:
         """Handle video info fetch error."""

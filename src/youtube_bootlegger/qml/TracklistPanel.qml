@@ -5,6 +5,15 @@ import QtQuick.Layouts
 Rectangle {
     id: root
     required property QtObject colors
+    signal openSettingsRequested()
+
+    // The backend writes AI-found (or undone) track lists into the box.
+    Connections {
+        target: backend
+        function onTracklistTextChanged() {
+            if (trackArea.text !== backend.tracklistText) trackArea.text = backend.tracklistText
+        }
+    }
 
     color: colors.card
     radius: colors.radius
@@ -25,6 +34,22 @@ Rectangle {
                 Text { text: "TEMPLATE"; color: root.colors.textSec; font { pixelSize: 11; weight: Font.DemiBold; letterSpacing: 0.8 } }
                 Text { text: "Placeholders: %songname%, %hh%, %mm%, %ss%, %ignore:regex%"; color: root.colors.textMuted; font.pixelSize: 10 }
                 Item { Layout.fillWidth: true }
+                Rectangle {
+                    objectName: "templateSetByAi"
+                    visible: backend.templateSetByAi
+                    implicitWidth: setByAiText.implicitWidth + 14; implicitHeight: 18
+                    radius: 9
+                    color: root.colors.elevated
+                    border.color: root.colors.accent; border.width: 1
+                    Text {
+                        id: setByAiText
+                        objectName: "templateSetByAiText"
+                        anchors.centerIn: parent
+                        text: "✨ " + backend.findTexts.setByAi
+                        color: root.colors.accentLight
+                        font.pixelSize: 10
+                    }
+                }
             }
 
             Rectangle {
@@ -63,12 +88,18 @@ Rectangle {
 
             Rectangle {
                 objectName: "aiButtonRect"
-                width: 52; height: 28; radius: root.colors.radiusSm
+                width: aiButtonText.implicitWidth + 24; height: 28; radius: root.colors.radiusSm
                 visible: !backend.aiAnalyzing
                 enabled: backend.aiAvailable && !backend.busy
                 opacity: enabled ? 1.0 : 0.45
                 color: aiMA.containsMouse && enabled ? root.colors.accentHover : root.colors.accent
-                Text { anchors.centerIn: parent; text: "AI"; color: "white"; font { pixelSize: 12; weight: Font.DemiBold } }
+                Text {
+                    id: aiButtonText
+                    objectName: "aiButtonText"
+                    anchors.centerIn: parent
+                    text: "✨ " + backend.aiButtonLabel
+                    color: "white"; font { pixelSize: 12; weight: Font.DemiBold }
+                }
                 MouseArea {
                     id: aiMA
                     objectName: "aiButton"
@@ -85,6 +116,142 @@ Rectangle {
                 Layout.preferredWidth: 24
                 Layout.preferredHeight: 24
                 running: backend.aiAnalyzing
+            }
+        }
+
+        /* ── track finder status: searching > banner > hint, one at a time ── */
+        Rectangle {
+            objectName: "findSearchingRow"
+            Layout.fillWidth: true
+            implicitHeight: 36
+            visible: backend.findSearching
+            radius: root.colors.radiusSm
+            color: root.colors.elevated
+            border.color: root.colors.border; border.width: 1
+
+            RowLayout {
+                anchors { fill: parent; leftMargin: 10; rightMargin: 6 }
+                spacing: 8
+                BusyIndicator {
+                    Layout.preferredWidth: 20; Layout.preferredHeight: 20
+                    running: backend.findSearching
+                }
+                Text {
+                    objectName: "findSearchingText"
+                    text: backend.findTexts.searching
+                    color: root.colors.text; font.pixelSize: 12
+                    elide: Text.ElideRight
+                    Layout.fillWidth: true
+                }
+                Rectangle {
+                    implicitWidth: stopText.implicitWidth + 20; implicitHeight: 24
+                    radius: root.colors.radiusSm
+                    color: stopMA.containsMouse ? root.colors.elevated : root.colors.surface
+                    border.color: root.colors.border; border.width: 1
+                    Text { id: stopText; anchors.centerIn: parent; text: backend.findTexts.stop; color: root.colors.text; font.pixelSize: 12 }
+                    MouseArea {
+                        id: stopMA
+                        objectName: "findStopButton"
+                        anchors.fill: parent
+                        hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                        onClicked: backend.stopFind()
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            objectName: "findBannerRow"
+            Layout.fillWidth: true
+            implicitHeight: 36
+            visible: !backend.findSearching && backend.findBanner !== ""
+            radius: root.colors.radiusSm
+            color: root.colors.elevated
+            border.color: root.colors.accent; border.width: 1
+
+            RowLayout {
+                anchors { fill: parent; leftMargin: 10; rightMargin: 6 }
+                spacing: 8
+                Text {
+                    objectName: "findBannerText"
+                    text: backend.findBanner
+                    color: root.colors.text; font.pixelSize: 12
+                    elide: Text.ElideRight
+                    Layout.fillWidth: true
+                }
+                Rectangle {
+                    implicitWidth: undoText.implicitWidth + 20; implicitHeight: 24
+                    radius: root.colors.radiusSm
+                    color: undoMA.containsMouse ? root.colors.accentHover : root.colors.accent
+                    Text { id: undoText; anchors.centerIn: parent; text: backend.findTexts.undo; color: "white"; font { pixelSize: 12; weight: Font.DemiBold } }
+                    MouseArea {
+                        id: undoMA
+                        objectName: "findUndoButton"
+                        anchors.fill: parent
+                        hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                        onClicked: backend.undoFind()
+                    }
+                }
+                Text {
+                    text: "✕"; color: root.colors.textMuted; font.pixelSize: 13
+                    Layout.preferredWidth: 20
+                    horizontalAlignment: Text.AlignHCenter
+                    MouseArea {
+                        objectName: "findBannerDismiss"
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: backend.dismissFindBanner()
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            objectName: "apiHintRow"
+            Layout.fillWidth: true
+            implicitHeight: hintLayout.implicitHeight + 12
+            visible: !backend.findSearching && backend.findBanner === "" && backend.apiHintVisible
+            radius: root.colors.radiusSm
+            color: root.colors.surface
+            border.color: root.colors.border; border.width: 1
+
+            RowLayout {
+                id: hintLayout
+                anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter; leftMargin: 10; rightMargin: 6 }
+                spacing: 8
+                Text { text: "ⓘ"; color: root.colors.accentLight; font.pixelSize: 13 }
+                Text {
+                    objectName: "apiHintText"
+                    text: backend.findTexts.apiHint
+                    color: root.colors.textSec; font.pixelSize: 11
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
+                }
+                Rectangle {
+                    implicitWidth: openSettingsText.implicitWidth + 20; implicitHeight: 24
+                    radius: root.colors.radiusSm
+                    color: openSettingsMA.containsMouse ? root.colors.elevated : root.colors.card
+                    border.color: root.colors.border; border.width: 1
+                    Text { id: openSettingsText; anchors.centerIn: parent; text: backend.findTexts.openSettings; color: root.colors.text; font.pixelSize: 12 }
+                    MouseArea {
+                        id: openSettingsMA
+                        objectName: "apiHintOpenSettings"
+                        anchors.fill: parent
+                        hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                        onClicked: root.openSettingsRequested()
+                    }
+                }
+                Text {
+                    text: "✕"; color: root.colors.textMuted; font.pixelSize: 13
+                    Layout.preferredWidth: 20
+                    horizontalAlignment: Text.AlignHCenter
+                    MouseArea {
+                        objectName: "apiHintDismiss"
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: backend.dismissApiHint()
+                    }
+                }
             }
         }
 

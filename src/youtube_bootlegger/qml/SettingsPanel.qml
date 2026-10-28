@@ -432,6 +432,47 @@ Item {
                         }
                     }
                 }
+
+                /* ── automatic track-list finding ── */
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 10
+
+                    Rectangle {
+                        width: 40; height: 22; radius: 11
+                        Layout.alignment: Qt.AlignTop
+                        color: backend.autoFindTracklist ? root.colors.accent : root.colors.inputBg
+                        border.color: root.colors.border; border.width: 1
+                        Behavior on color { ColorAnimation { duration: 150 } }
+
+                        Rectangle {
+                            width: 18; height: 18; radius: 9
+                            color: "white"
+                            anchors.verticalCenter: parent.verticalCenter
+                            x: backend.autoFindTracklist ? parent.width - width - 2 : 2
+                            Behavior on x { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
+                        }
+
+                        MouseArea {
+                            objectName: "autoFindToggle"
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: backend.setAutoFindTracklist(!backend.autoFindTracklist)
+                        }
+                    }
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 2
+                        Text { text: backend.findTexts.autoFindLabel; color: root.colors.text; font.pixelSize: 13 }
+                        Text {
+                            objectName: "autoFindNote"
+                            text: backend.findTexts.autoFindNote
+                            color: root.colors.textMuted; font.pixelSize: 11
+                            wrapMode: Text.Wrap
+                            Layout.fillWidth: true
+                        }
+                    }
+                }
             }
 
             Item { Layout.preferredHeight: 4 }

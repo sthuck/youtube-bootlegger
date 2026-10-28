@@ -12,23 +12,35 @@ from PySide6.QtCore import (
 )
 
 from ..app_logic import (
+    AiButtonMode,
+    CancelReason,
     FormError,
     FormField,
+    FormValues,
     JobForm,
+    LogLine,
+    TrackFinderSession,
+    ai_button_label,
+    ai_button_mode,
     build_help_content,
     build_job,
     check_ai_assist_ready,
+    check_find_ready,
     format_progress_stage,
+    preview_comment_limit,
+    should_auto_find,
     summarize_preview,
     summarize_video,
+    video_sources_log_line,
 )
+from ..app_logic import track_finder as finder_text
 from ..core import DEFAULT_TEMPLATE, preview_parse, validate_template
 from ..llm import is_llm_configured, launch_chatgpt_lite_assist
 from ..core.settings import AppSettings, LlmProvider, get_settings
 from ..core.video_info import VideoInfo
 from ..models import DownloadJob
 from ..utils import is_ffmpeg_available, is_valid_youtube_url
-from ..workers import PipelineWorker, TracklistAiWorker, VideoInfoWorker
+from ..workers import PipelineWorker, TracklistAiWorker, TracklistFindWorker, VideoInfoWorker
 from .models import StatusLogModel, TrackPreviewModel
 
 
@@ -91,6 +103,13 @@ class AppBackend(QObject):
     albumNameChanged = Signal()
     aiAnalyzingChanged = Signal()
     aiAvailableChanged = Signal()
+    aiButtonLabelChanged = Signal()
+    tracklistTextChanged = Signal()
+    findSearchingChanged = Signal()
+    findBannerChanged = Signal()
+    apiHintVisibleChanged = Signal()
+    templateSetByAiChanged = Signal()
+    autoFindTracklistChanged = Signal()
 
     showMessage = Signal(str, str, bool)  # title, message, isError
 
@@ -138,6 +157,17 @@ class AppBackend(QObject):
     albumName = Property(str, _getter("_album"), notify=albumNameChanged)
     aiAnalyzing = Property(bool, _getter("_ai_analyzing"), notify=aiAnalyzingChanged)
     aiAvailable = Property(bool, _getter("_ai_available"), notify=aiAvailableChanged)
+    aiButtonLabel = Property(str, _getter("_ai_button_label"), notify=aiButtonLabelChanged)
+    tracklistText = Property(str, _getter("_tracklist_text"), notify=tracklistTextChanged)
+    findSearching = Property(bool, _getter("_find_searching"), notify=findSearchingChanged)
+    findBanner = Property(str, _getter("_find_banner"), notify=findBannerChanged)
+    apiHintVisible = Property(bool, _getter("_api_hint_visible"), notify=apiHintVisibleChanged)
+    templateSetByAi = Property(bool, _getter("_template_set_by_ai"), notify=templateSetByAiChanged)
+    autoFindTracklist = Property(
+        bool, _getter("_auto_find_tracklist"), notify=autoFindTracklistChanged
+    )
+    # Every track-finder string comes from app_logic, so all UIs read alike.
+    findTexts = Property("QVariantMap", _getter("_find_texts"), constant=True)
 
     trackPreviewModel = Property(QObject, _getter("_track_model"), constant=True)
     statusLogModel = Property(QObject, _getter("_log_model"), constant=True)
@@ -153,6 +183,10 @@ class AppBackend(QObject):
         self._video_info_workers: set[VideoInfoWorker] = set()
         self._video_request_id = 0
         self._tracklist_ai_worker: TracklistAiWorker | None = None
+        # Held until they report back, like the video-info workers; Stop only
+        # makes the session discard a result, the request itself still runs.
+        self._find_workers: set[TracklistFindWorker] = set()
+        self._finder = TrackFinderSession()
         self._video_info: VideoInfo | None = None
         self._last_fetched_url = ""
 
@@ -205,6 +239,22 @@ class AppBackend(QObject):
         self._compatible_model = self._app_settings.compatible_model
         self._ai_analyzing = False
         self._ai_available = False
+        self._ai_button_label = ai_button_label(AiButtonMode.FIND)
+        self._find_searching = False
+        self._find_banner = ""
+        self._api_hint_visible = False
+        self._template_set_by_ai = False
+        self._auto_find_tracklist = self._app_settings.auto_find_tracklist
+        self._find_texts = {
+            "searching": finder_text.SEARCHING_TEXT,
+            "stop": finder_text.STOP_BUTTON_LABEL,
+            "undo": finder_text.UNDO_BUTTON_LABEL,
+            "setByAi": finder_text.TEMPLATE_SET_BY_AI_TEXT,
+            "apiHint": finder_text.API_HINT_TEXT,
+            "openSettings": finder_text.OPEN_SETTINGS_LABEL,
+            "autoFindLabel": finder_text.AUTO_FIND_SETTING_LABEL,
+            "autoFindNote": finder_text.AUTO_FIND_SETTING_NOTE,
+        }
 
         self._track_model = TrackPreviewModel(self)
         self._log_model = StatusLogModel(self)
@@ -219,13 +269,32 @@ class AppBackend(QObject):
             signal.emit()
 
     def _refresh_ai_available(self):
-        has_tracklist = bool(self._tracklist_text.strip())
-        has_video = self._video_info is not None
-        configured = is_llm_configured(self._app_settings)
+        """Refresh the AI button and every track-finder indicator."""
+        mode = ai_button_mode(self._tracklist_text)
+        idle = (
+            self._video_info is not None
+            and not self._ai_analyzing
+            and not self._finder.searching
+        )
+        # Find explains a missing API model when clicked, so it stays enabled.
+        available = idle and (
+            mode == AiButtonMode.FIND or is_llm_configured(self._app_settings)
+        )
+        self._emit("_ai_available", available, self.aiAvailableChanged)
+        self._emit("_ai_button_label", ai_button_label(mode), self.aiButtonLabelChanged)
+        self._emit("_find_searching", self._finder.searching, self.findSearchingChanged)
+        self._emit("_find_banner", self._finder.banner, self.findBannerChanged)
         self._emit(
-            "_ai_available",
-            has_tracklist and has_video and configured and not self._ai_analyzing,
-            self.aiAvailableChanged,
+            "_api_hint_visible",
+            self._finder.show_api_hint(
+                self._app_settings, self._video_info, self._tracklist_text
+            ),
+            self.apiHintVisibleChanged,
+        )
+        self._emit(
+            "_template_set_by_ai",
+            self._finder.template_set_by_ai(self._template),
+            self.templateSetByAiChanged,
         )
 
     def _refresh_llm_configured(self):
@@ -253,6 +322,7 @@ class AppBackend(QObject):
         # drops any in-flight result for the old URL.
         self._last_fetched_url = ""
         self._video_request_id += 1
+        self._on_finder_video_changed()
         if self._has_video_state():
             self._clear_video()
         if not url or not is_valid_youtube_url(url):
@@ -270,10 +340,14 @@ class AppBackend(QObject):
             self.templateErrorChanged,
         )
         self._update_preview()
+        self._refresh_ai_available()
 
     @Slot(str)
     def setTracklistText(self, text):
-        self._tracklist_text = text
+        if text != self._tracklist_text:
+            self._tracklist_text = text
+            self.tracklistTextChanged.emit()
+        self._log(self._finder.on_tracklist_edited(text))
         self._update_preview()
         self._refresh_ai_available()
 
@@ -410,12 +484,47 @@ class AppBackend(QObject):
             self.compatibleModelChanged,
         )
 
+    @Slot(bool)
+    def setAutoFindTracklist(self, enabled):
+        self._app_settings.auto_find_tracklist = enabled
+        self._app_settings.sync()
+        self._emit("_auto_find_tracklist", enabled, self.autoFindTracklistChanged)
+
+    @Slot()
+    def stopFind(self):
+        self._log(self._finder.cancel(CancelReason.STOPPED))
+        self._refresh_ai_available()
+
+    @Slot()
+    def undoFind(self):
+        values = self._finder.undo()
+        if values is not None:
+            self._write_form_values(values)
+        self._refresh_ai_available()
+
+    @Slot()
+    def dismissFindBanner(self):
+        self._finder.dismiss_banner()
+        self._refresh_ai_available()
+
+    @Slot()
+    def dismissApiHint(self):
+        self._finder.dismiss_api_hint()
+        self._refresh_ai_available()
+
     @Slot()
     def analyzeTracklistWithAi(self):
-        if self._ai_analyzing:
+        """The AI button: find a track list when the box is empty, else detect its format."""
+        if self._ai_analyzing or self._finder.searching:
             return
-        if not self._tracklist_text.strip():
+        if ai_button_mode(self._tracklist_text) == AiButtonMode.FIND:
+            problem = check_find_ready(self._video_info, self._app_settings)
+            if problem:
+                self.showMessage.emit("AI Assist", problem, True)
+                return
+            self._start_find(self._video_info, manual=True)
             return
+
         problem = check_ai_assist_ready(
             self._video_info, self._tracklist_text, self._app_settings
         )
@@ -455,6 +564,68 @@ class AppBackend(QObject):
         self._emit("_ai_analyzing", False, self.aiAnalyzingChanged)
         self._refresh_ai_available()
         self.showMessage.emit("AI Assist", message, True)
+
+    # ── Track-list finder ───────────────────────────────────────────
+
+    def _log(self, line: LogLine | None):
+        if line is not None:
+            self._log_model.append(line.text, line.level)
+
+    def _form_values(self) -> FormValues:
+        return FormValues(self._tracklist_text, self._template, self._artist, self._album)
+
+    def _write_form_values(self, values: FormValues):
+        # Template first, so the new track list previews with the right template.
+        self.setTemplate(values.template)
+        self.setArtist(values.artist)
+        self.setAlbum(values.album)
+        self.setTracklistText(values.tracklist)
+
+    def _start_find(self, info: VideoInfo, *, manual: bool):
+        token = self._finder.begin(info.video_id)
+        cached = self._finder.cached(info.video_id)
+        if cached is not None:
+            self._apply_find(self._finder.complete(token, info.video_id, cached, self._form_values()))
+            return
+
+        worker = TracklistFindWorker(self._app_settings, info, token)
+        self._find_workers.add(worker)
+
+        def on_finished(token, result):
+            self._find_workers.discard(worker)
+            self._apply_find(
+                self._finder.complete(token, info.video_id, result, self._form_values())
+            )
+
+        def on_error(token, message):
+            self._find_workers.discard(worker)
+            line = self._finder.fail(token, message)
+            if line is None:
+                return
+            self._log(line)
+            self._refresh_ai_available()
+            if manual:
+                self.showMessage.emit("AI Assist", message, True)
+
+        worker.signals.finished.connect(on_finished)
+        worker.signals.error.connect(on_error)
+        self._thread_pool.start(worker)
+        self._refresh_ai_available()
+
+    def _apply_find(self, application):
+        if application is None:  # Stale: stopped, edited or video changed.
+            return
+        if application.values is not None:
+            self._write_form_values(application.values)
+        for line in application.log:
+            self._log(line)
+        self._refresh_ai_available()
+
+    def _on_finder_video_changed(self):
+        values, line = self._finder.on_video_changed()
+        self._log(line)
+        if values is not None:
+            self._write_form_values(values)
 
     @Slot()
     def startPipeline(self):
@@ -510,7 +681,11 @@ class AppBackend(QObject):
 
         self._video_request_id += 1
         request_id = self._video_request_id
-        worker = VideoInfoWorker(url, settings=self._app_settings)
+        worker = VideoInfoWorker(
+            url,
+            settings=self._app_settings,
+            comment_limit=preview_comment_limit(self._app_settings),
+        )
         self._video_info_workers.add(worker)
 
         def on_loaded(info):
@@ -540,7 +715,10 @@ class AppBackend(QObject):
         self._emit("_video_loaded", True, self.videoLoadedChanged)
         self._emit("_video_error", "", self.videoErrorChanged)
         self._emit("_album_placeholder", info.title, self.albumPlaceholderChanged)
+        self._log(video_sources_log_line(info, self._app_settings))
         self._refresh_ai_available()
+        if should_auto_find(self._app_settings, info, self._tracklist_text):
+            self._start_find(info, manual=False)
 
     def _on_video_info_error(self, message: str, request_id: int):
         if request_id != self._video_request_id:

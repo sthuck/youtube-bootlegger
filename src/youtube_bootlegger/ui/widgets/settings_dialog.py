@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ...app_logic.track_finder import AUTO_FIND_SETTING_LABEL, AUTO_FIND_SETTING_NOTE
 from ...llm import (
     DEFAULT_ANTHROPIC_MODEL,
     DEFAULT_COMPATIBLE_MODEL,
@@ -182,6 +183,14 @@ class SettingsDialog(QDialog):
 
         self._llm_button_group.idClicked.connect(self._on_llm_provider_changed)
         self._update_llm_field_visibility()
+
+        self._auto_find_checkbox = QCheckBox(AUTO_FIND_SETTING_LABEL)
+        llm_layout.addWidget(self._auto_find_checkbox)
+        auto_find_note = QLabel(AUTO_FIND_SETTING_NOTE)
+        auto_find_note.setWordWrap(True)
+        auto_find_note.setStyleSheet("color: gray; font-size: 11px;")
+        llm_layout.addWidget(auto_find_note)
+
         layout.addWidget(llm_group)
 
         scroll.setWidget(content)
@@ -258,6 +267,8 @@ class SettingsDialog(QDialog):
         self._compatible_bearer_token.setText(self._settings.compatible_bearer_token)
         self._compatible_model.setText(self._settings.compatible_model)
 
+        self._auto_find_checkbox.setChecked(self._settings.auto_find_tracklist)
+
         provider = self._settings.llm_provider
         radio_map = {
             LlmProvider.CHATGPT_LITE: self._none_radio,
@@ -288,6 +299,7 @@ class SettingsDialog(QDialog):
         self._settings.compatible_model = self._compatible_model.text()
 
         self._settings.llm_provider = self._selected_llm_provider()
+        self._settings.auto_find_tracklist = self._auto_find_checkbox.isChecked()
 
         self._settings.sync()
         self.accept()

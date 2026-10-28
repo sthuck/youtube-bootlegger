@@ -14,14 +14,33 @@ from textual.timer import Timer
 from textual.widgets import Button, Footer, Header, Input, Label, Static, TextArea
 
 from ..app_logic import (
+    AiButtonMode,
+    CancelReason,
     FormError,
     FormField,
+    FormValues,
     JobForm,
+    LogLine,
+    TrackFinderSession,
+    ai_button_label,
+    ai_button_mode,
     build_job,
     check_ai_assist_ready,
+    check_find_ready,
     format_progress_stage,
+    preview_comment_limit,
+    should_auto_find,
     summarize_preview,
     summarize_video,
+    video_sources_log_line,
+)
+from ..app_logic.track_finder import (
+    API_HINT_TEXT,
+    OPEN_SETTINGS_LABEL,
+    SEARCHING_TEXT,
+    STOP_BUTTON_LABEL,
+    TEMPLATE_SET_BY_AI_TEXT,
+    UNDO_BUTTON_LABEL,
 )
 from ..core import DEFAULT_TEMPLATE, DownloadSplitPipeline, preview_parse, validate_template
 from ..core.exceptions import YouTubeBootleggerError
@@ -30,8 +49,11 @@ from ..core.video_info import VideoInfo, fetch_video_info
 from ..llm import (
     LlmExtractionError,
     TracklistExtraction,
+    TracklistFindError,
+    TracklistFindResult,
     build_lite_prompt,
     extract_tracklist_metadata,
+    find_tracklist,
     launch_chatgpt_lite_assist,
 )
 from ..models import DownloadJob
@@ -61,6 +83,11 @@ FOCUS_TARGET_IDS = {
     FormField.METADATA: "artist",
     FormField.OUTPUT_DIR: "output-dir",
 }
+
+# Which message the row above the track list shows (at most one at a time).
+FIND_ROW_SEARCHING = "searching"
+FIND_ROW_BANNER = "banner"
+FIND_ROW_HINT = "hint"
 
 TRACKLIST_PLACEHOLDER = "Paste the track list here, one song per line:\nIntro - 0:00\nFirst Song - 3:15"
 
@@ -98,6 +125,9 @@ class BootleggerApp(App[None]):
         self._url_timer: Timer | None = None
         self._pipeline: DownloadSplitPipeline | None = None
         self._pipeline_stopped = threading.Event()
+        self._finder = TrackFinderSession()
+        self._find_manual = False  # Whether the running search was a button click.
+        self._find_row_state = ""
 
     # ── Layout ──────────────────────────────────────────────────────
 
@@ -111,6 +141,15 @@ class BootleggerApp(App[None]):
                 with Horizontal(id="tracks"):
                     with Vertical(id="tracklist-col"):
                         yield Label("Track list", classes="field-label")
+                        with Vertical(id="find-row"):
+                            yield Static("", id="find-text")
+                            with Horizontal(id="find-buttons"):
+                                yield Button(STOP_BUTTON_LABEL, id="find-stop", compact=True)
+                                yield Button(UNDO_BUTTON_LABEL, id="find-undo", compact=True)
+                                yield Button(
+                                    OPEN_SETTINGS_LABEL, id="find-open-settings", compact=True
+                                )
+                                yield Button("✕", id="find-dismiss", compact=True)
                         yield TextArea(id="tracklist", placeholder=TRACKLIST_PLACEHOLDER)
                         yield Static("", id="tracklist-error", classes="field-error")
                     with Vertical(id="preview-col"):
@@ -121,6 +160,7 @@ class BootleggerApp(App[None]):
                 yield Label("Track list template", classes="field-label")
                 with Horizontal(id="template-row"):
                     yield Input(DEFAULT_TEMPLATE, id="template")
+                    yield Static(TEMPLATE_SET_BY_AI_TEXT, id="template-ai-marker")
                     yield Button("✦ AI Assist", id="ai-assist")
                 yield Static("", id="template-error", classes="field-error")
                 with Horizontal(id="metadata-row"):
@@ -148,6 +188,7 @@ class BootleggerApp(App[None]):
         self.register_theme(BOOTLEGGER_THEME)
         self.theme = BOOTLEGGER_THEME.name
         self.query_one("#url", Input).focus()
+        self._refresh_find_ui()
         if not is_ffmpeg_available(self._settings.resolved_ffmpeg_command()):
             self._log("FFmpeg not found — install it or set its path in Settings (F2).", "warn")
             self._notify(
@@ -173,6 +214,8 @@ class BootleggerApp(App[None]):
         if event.text_area.id == "tracklist":
             self._set_field_error(FormField.TRACKLIST, "")
             self._update_preview()
+            self._log_line(self._finder.on_tracklist_edited(event.text_area.text))
+            self._refresh_find_ui()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         actions = {
@@ -180,6 +223,10 @@ class BootleggerApp(App[None]):
             "cancel": self.action_cancel,
             "browse": self.action_browse,
             "ai-assist": self.action_ai_assist,
+            "find-stop": self._stop_find,
+            "find-undo": self._undo_find,
+            "find-open-settings": self.action_settings,
+            "find-dismiss": self._dismiss_find_row,
         }
         action = actions.get(event.button.id or "")
         if action:
@@ -190,9 +237,7 @@ class BootleggerApp(App[None]):
         self.query_one("#cancel", Button).disabled = not busy
 
     def watch_ai_running(self, running: bool) -> None:
-        button = self.query_one("#ai-assist", Button)
-        button.disabled = running
-        button.label = "Analyzing…" if running else "✦ AI Assist"
+        self._refresh_find_ui()
 
     # ── Video info ──────────────────────────────────────────────────
 
@@ -224,7 +269,9 @@ class BootleggerApp(App[None]):
 
     def _load_video_info(self, url: str) -> None:
         try:
-            info = fetch_video_info(url, self._settings)
+            info = fetch_video_info(
+                url, self._settings, comment_limit=preview_comment_limit(self._settings)
+            )
         except YouTubeBootleggerError as e:
             self._post(self._on_video_info_error, url, str(e))
             return
@@ -241,6 +288,10 @@ class BootleggerApp(App[None]):
         self.query_one("#album", Input).placeholder = info.title
         if self._show_thumbnail and info.thumbnail_url:
             self._in_background(self._load_thumbnail, info.video_id, info.thumbnail_url)
+        self._log_line(video_sources_log_line(info, self._settings))
+        self._refresh_find_ui()
+        if should_auto_find(self._settings, info, self._tracklist_text()):
+            self._start_find(info, manual=False)
 
     def _on_video_info_error(self, url: str, message: str) -> None:
         if url != self._last_fetched_url:
@@ -265,6 +316,11 @@ class BootleggerApp(App[None]):
         self._video_info = None
         self.query_one(VideoPanel).show_placeholder()
         self.query_one("#album", Input).placeholder = "Defaults to video title"
+        values, line = self._finder.on_video_changed()
+        self._log_line(line)
+        if values is not None:
+            self._write_form_values(values)
+        self._refresh_find_ui()
 
     # ── Track list preview ──────────────────────────────────────────
 
@@ -276,6 +332,7 @@ class BootleggerApp(App[None]):
         message = "" if validation.is_valid else (validation.error or "Invalid template")
         self._set_field_error(FormField.TEMPLATE, message)
         self._update_preview()
+        self._refresh_find_ui()
 
     def _update_preview(self) -> None:
         text = self.query_one("#tracklist", TextArea).text
@@ -372,9 +429,16 @@ class BootleggerApp(App[None]):
     # ── AI assist ───────────────────────────────────────────────────
 
     def action_ai_assist(self) -> None:
-        if self.ai_running:
+        if self.ai_running or self._finder.searching:
             return
         tracklist = self.query_one("#tracklist", TextArea).text
+        if ai_button_mode(tracklist) == AiButtonMode.FIND:
+            problem = check_find_ready(self._video_info, self._settings)
+            if problem:
+                self._notify(problem, title="AI Assist", severity="warning")
+                return
+            self._start_find(self._video_info, manual=True)
+            return
         problem = check_ai_assist_ready(self._video_info, tracklist, self._settings)
         if problem:
             self._notify(problem, title="AI Assist", severity="warning")
@@ -438,6 +502,109 @@ class BootleggerApp(App[None]):
         self.ai_running = False
         self._notify(message, title="AI Assist", severity="error", timeout=10)
 
+    # ── AI track-list finder ────────────────────────────────────────
+
+    def _start_find(self, info: VideoInfo, *, manual: bool) -> None:
+        token = self._finder.begin(info.video_id)
+        cached = self._finder.cached(info.video_id)
+        if cached is not None:
+            self._on_find_finished(token, info.video_id, cached)
+            return
+        self._find_manual = manual
+        self._refresh_find_ui()
+        self._in_background(self._run_find, token, info)
+
+    def _run_find(self, token: int, info: VideoInfo) -> None:
+        try:
+            result = find_tracklist(self._settings, info)
+        except TracklistFindError as e:
+            self._post(self._on_find_error, token, str(e))
+            return
+        except Exception as e:
+            self._post(self._on_find_error, token, f"Unexpected error: {e}")
+            return
+        self._post(self._on_find_finished, token, info.video_id, result)
+
+    def _on_find_finished(self, token: int, video_id: str, result: TracklistFindResult) -> None:
+        application = self._finder.complete(token, video_id, result, self._form_values())
+        if application is None:
+            return  # Stopped, superseded, or the video changed meanwhile.
+        if application.values is not None:
+            self._write_form_values(application.values)
+        for line in application.log:
+            self._log_line(line)
+        self._refresh_find_ui()
+
+    def _on_find_error(self, token: int, message: str) -> None:
+        line = self._finder.fail(token, message)
+        if line is None:
+            return
+        self._log_line(line)
+        if self._find_manual:
+            self._notify(message, title="AI Assist", severity="error", timeout=10)
+        self._refresh_find_ui()
+
+    def _stop_find(self) -> None:
+        self._log_line(self._finder.cancel(CancelReason.STOPPED))
+        self._refresh_find_ui()
+
+    def _undo_find(self) -> None:
+        values = self._finder.undo()
+        if values is not None:
+            self._write_form_values(values)
+        self._refresh_find_ui()
+
+    def _dismiss_find_row(self) -> None:
+        if self._find_row_state == FIND_ROW_BANNER:
+            self._finder.dismiss_banner()
+        elif self._find_row_state == FIND_ROW_HINT:
+            self._finder.dismiss_api_hint()
+        self._refresh_find_ui()
+
+    def _form_values(self) -> FormValues:
+        return FormValues(
+            tracklist=self._tracklist_text(),
+            template=self.query_one("#template", Input).value,
+            artist=self.query_one("#artist", Input).value,
+            album=self.query_one("#album", Input).value,
+        )
+
+    def _write_form_values(self, values: FormValues) -> None:
+        # Template first, so the preview parses the new list with it.
+        self.query_one("#template", Input).value = values.template
+        self.query_one("#tracklist", TextArea).text = values.tracklist
+        self.query_one("#artist", Input).value = values.artist
+        self.query_one("#album", Input).value = values.album
+
+    def _refresh_find_ui(self) -> None:
+        tracklist = self._tracklist_text()
+        button = self.query_one("#ai-assist", Button)
+        button.disabled = self.ai_running or self._finder.searching
+        if self.ai_running:
+            button.label = "Analyzing…"
+        else:
+            button.label = f"✦ {ai_button_label(ai_button_mode(tracklist))}"
+
+        if self._finder.searching:
+            state, text = FIND_ROW_SEARCHING, SEARCHING_TEXT
+        elif self._finder.banner:
+            state, text = FIND_ROW_BANNER, self._finder.banner
+        elif self._finder.show_api_hint(self._settings, self._video_info, tracklist):
+            state, text = FIND_ROW_HINT, API_HINT_TEXT
+        else:
+            state, text = "", ""
+        self._find_row_state = state
+        self.query_one("#find-row").display = bool(state)
+        self.query_one("#find-text", Static).update(Text(text))
+        self.query_one("#find-row").set_class(state == FIND_ROW_HINT, "-hint")
+        self.query_one("#find-stop").display = state == FIND_ROW_SEARCHING
+        self.query_one("#find-undo").display = state == FIND_ROW_BANNER
+        self.query_one("#find-open-settings").display = state == FIND_ROW_HINT
+        self.query_one("#find-dismiss").display = state in (FIND_ROW_BANNER, FIND_ROW_HINT)
+
+        template = self.query_one("#template", Input).value
+        self.query_one("#template-ai-marker").display = self._finder.template_set_by_ai(template)
+
     # ── Dialogs ─────────────────────────────────────────────────────
 
     def action_help(self) -> None:
@@ -447,6 +614,7 @@ class BootleggerApp(App[None]):
         def on_close(saved: bool | None) -> None:
             if saved:
                 self._notify("Settings saved.")
+            self._refresh_find_ui()
 
         self.push_screen(SettingsScreen(self._settings), on_close)
 
@@ -522,3 +690,10 @@ class BootleggerApp(App[None]):
 
     def _log(self, message: str, level: str = "info") -> None:
         self.query_one(StatusLog).log_message(message, level)
+
+    def _log_line(self, line: LogLine | None) -> None:
+        if line is not None:
+            self._log(line.text, line.level)
+
+    def _tracklist_text(self) -> str:
+        return self.query_one("#tracklist", TextArea).text
