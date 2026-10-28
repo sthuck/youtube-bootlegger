@@ -41,7 +41,7 @@ def ffmpeg_available(monkeypatch):
 def fake_video(monkeypatch, ffmpeg_available):
     calls = []
 
-    def fetch(url, settings=None):
+    def fetch(url, settings=None, comment_limit=0):
         calls.append((url, settings))
         return make_video()
 

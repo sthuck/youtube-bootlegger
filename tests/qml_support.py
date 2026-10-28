@@ -125,7 +125,7 @@ class GatedFetch:
     def __init__(self):
         self.calls: list[FetchCall] = []
 
-    def __call__(self, url, settings=None):
+    def __call__(self, url, settings=None, comment_limit=0):
         call = FetchCall(url)
         self.calls.append(call)
         return call.wait()

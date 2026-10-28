@@ -102,7 +102,7 @@ class TestVideoInfo:
     def test_fetch_error_is_displayed_in_qml(self, qml_harness, monkeypatch):
         window, backend, _settings = qml_harness
 
-        def failing_fetch(url, settings=None):
+        def failing_fetch(url, settings=None, comment_limit=0):
             raise ValidationError("Video unavailable")
 
         monkeypatch.setattr(video_worker_module, "fetch_video_info", failing_fetch)

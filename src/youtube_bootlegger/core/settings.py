@@ -22,6 +22,7 @@ _VERTEX_MODEL_KEY = "llm/vertex_model"
 _COMPATIBLE_BASE_URL_KEY = "llm/compatible_base_url"
 _COMPATIBLE_BEARER_TOKEN_KEY = "llm/compatible_bearer_token"
 _COMPATIBLE_MODEL_KEY = "llm/compatible_model"
+_AUTO_FIND_TRACKLIST_KEY = "llm/auto_find_tracklist"
 
 
 class LlmProvider(StrEnum):
@@ -195,6 +196,19 @@ class AppSettings:
     @compatible_model.setter
     def compatible_model(self, value: str) -> None:
         self._backend.setValue(_COMPATIBLE_MODEL_KEY, (value or "").strip())
+
+    @property
+    def auto_find_tracklist(self) -> bool:
+        """Run the AI track-list finder automatically when a video loads.
+
+        Defaults to True. Only takes effect with an API model (not ChatGPT
+        Lite); the "Find with AI" button works regardless of this setting.
+        """
+        raise NotImplementedError
+
+    @auto_find_tracklist.setter
+    def auto_find_tracklist(self, enabled: bool) -> None:
+        raise NotImplementedError
 
     def sync(self) -> None:
         """Flush settings to persistent storage."""

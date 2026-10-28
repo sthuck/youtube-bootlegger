@@ -18,16 +18,25 @@ class VideoInfoSignals(QObject):
 class VideoInfoWorker(QRunnable):
     """QRunnable worker for fetching video info in background."""
 
-    def __init__(self, url: str, settings: AppSettings | None = None):
+    def __init__(
+        self,
+        url: str,
+        settings: AppSettings | None = None,
+        *,
+        comment_limit: int = 0,
+    ):
         """Initialize the worker.
 
         Args:
             url: YouTube URL to fetch info for.
             settings: Application settings. Defaults to the shared singleton.
+            comment_limit: Passed to fetch_video_info; callers use
+                app_logic.preview_comment_limit(settings).
         """
         super().__init__()
         self.url = url
         self.settings = settings
+        self.comment_limit = comment_limit
         self.signals = VideoInfoSignals()
 
     def run(self) -> None:
@@ -35,7 +44,9 @@ class VideoInfoWorker(QRunnable):
         self.signals.started.emit()
 
         try:
-            info = fetch_video_info(self.url, settings=self.settings)
+            info = fetch_video_info(
+                self.url, settings=self.settings, comment_limit=self.comment_limit
+            )
             self.signals.finished.emit(info)
         except ValidationError as e:
             self.signals.error.emit(str(e))
