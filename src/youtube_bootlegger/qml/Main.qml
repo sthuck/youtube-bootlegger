@@ -222,13 +222,6 @@ ApplicationWindow {
                                 color: _c.text; font.pixelSize: 13; clip: true
                                 text: backend.artistName
                                 onTextChanged: if (text !== backend.artistName) backend.setArtist(text)
-                                Connections {
-                                    target: backend
-                                    function onArtistNameChanged() {
-                                        if (artistField.text !== backend.artistName)
-                                            artistField.text = backend.artistName
-                                    }
-                                }
                                 Text {
                                     anchors.fill: parent; verticalAlignment: Text.AlignVCenter
                                     text: "Enter artist name"; color: _c.textMuted; font.pixelSize: 13
@@ -256,13 +249,6 @@ ApplicationWindow {
                                 color: _c.text; font.pixelSize: 13; clip: true
                                 text: backend.albumName
                                 onTextChanged: if (text !== backend.albumName) backend.setAlbum(text)
-                                Connections {
-                                    target: backend
-                                    function onAlbumNameChanged() {
-                                        if (albumField.text !== backend.albumName)
-                                            albumField.text = backend.albumName
-                                    }
-                                }
                                 Text {
                                     objectName: "albumPlaceholderText"
                                     anchors.fill: parent; verticalAlignment: Text.AlignVCenter

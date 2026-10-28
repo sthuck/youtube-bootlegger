@@ -43,13 +43,6 @@ Rectangle {
                     clip: true
                     text: backend.currentTemplate
                     onTextChanged: if (text !== backend.currentTemplate) backend.setTemplate(text)
-                    Connections {
-                        target: backend
-                        function onCurrentTemplateChanged() {
-                            if (tplField.text !== backend.currentTemplate)
-                                tplField.text = backend.currentTemplate
-                        }
-                    }
                 }
             }
 

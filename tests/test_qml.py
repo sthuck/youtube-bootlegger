@@ -1,270 +1,67 @@
 """End-to-end interaction tests for the QML UI, driven headlessly with QTest."""
 
+import inspect
 import json
-import os
-import sys
 import threading
-import time
-from pathlib import Path
+from functools import partial
 
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-
-import pytest
-from PySide6.QtCore import QModelIndex, QObject, QPointF, Qt
-from PySide6.QtQuick import QQuickItem, QQuickWindow
-from PySide6.QtTest import QTest
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
-from src.youtube_bootlegger.app_qml import create_qml_engine
 from src.youtube_bootlegger.core.exceptions import DownloadError, ValidationError
+from src.youtube_bootlegger.core.pipeline import DownloadSplitPipeline
 from src.youtube_bootlegger.core.settings import AppSettings, LlmProvider
-from src.youtube_bootlegger.core.video_info import VideoInfo
 from src.youtube_bootlegger.llm import DEFAULT_OPENAI_MODEL, LlmError
 from src.youtube_bootlegger.llm.client import OPENAI_CHAT_URL
 from src.youtube_bootlegger.qml_backend import AppBackend
 from src.youtube_bootlegger.qml_backend import backend as backend_module
-from src.youtube_bootlegger.workers import pipeline_worker as pipeline_worker_module
-from src.youtube_bootlegger.workers import tracklist_ai_worker as ai_worker_module
+from src.youtube_bootlegger.workers import TracklistAiWorker
 from src.youtube_bootlegger.workers import video_info_worker as video_worker_module
-
-VALID_URL = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-
-
-class DictBackend:
-    """In-memory QSettings stand-in for isolated test runs."""
-
-    def __init__(self):
-        self.data = {}
-        self.synced = 0
-
-    def value(self, key, default=None):
-        return self.data.get(key, default)
-
-    def setValue(self, key, value):
-        self.data[key] = value
-
-    def sync(self):
-        self.synced += 1
+from tests.qml_support import (
+    OTHER_URL,
+    VALID_URL,
+    FakePipeline,
+    click_item,
+    fill_form,
+    find_item,
+    load_video,
+    open_window,
+    press_key,
+    prop,
+    set_text,
+    type_text,
+    wait_for_workers,
+    wait_until,
+)
 
 
-def make_video(**overrides) -> VideoInfo:
-    fields = {
-        "video_id": "dQw4w9WgXcQ",
-        "title": "Live at the Venue",
-        "channel": "Band Channel",
-        "duration": 3600,
-        "duration_string": "1:00:00",
-        "thumbnail_url": "",
-        "view_count": 1_500,
-        "upload_date": "20240131",
-    }
-    fields.update(overrides)
-    return VideoInfo(**fields)
-
-
-class FakePipeline:
-    """Stands in for DownloadSplitPipeline; behaviour configured per test."""
-
-    instances: list["FakePipeline"] = []
-    outcome: object = None
-    gate: threading.Event | None = None
-
-    def __init__(self, progress_callback=None, log_callback=None, settings=None):
-        self.progress_callback = progress_callback
-        self.log_callback = log_callback
-        self.settings = settings
-        self.cancelled = False
-        self.job = None
-        FakePipeline.instances.append(self)
-
-    def execute(self, job):
-        self.job = job
-        if self.log_callback:
-            self.log_callback("Starting fake pipeline")
-        if self.progress_callback:
-            self.progress_callback("download", 50.0, "Downloading 50%")
-        if FakePipeline.gate is not None:
-            FakePipeline.gate.wait(timeout=5)
-        if self.cancelled:
-            return []
-        if isinstance(FakePipeline.outcome, Exception):
-            raise FakePipeline.outcome
-        return FakePipeline.outcome
-
-    def cancel(self):
-        self.cancelled = True
-
-
-@pytest.fixture(scope="session")
-def qapp():
-    app = QApplication.instance()
-    if app is None:
-        app = QApplication(sys.argv)
-    return app
-
-
-@pytest.fixture
-def settings():
-    return AppSettings(DictBackend())
-
-
-@pytest.fixture
-def fake_pipeline(monkeypatch):
-    FakePipeline.instances = []
-    FakePipeline.outcome = [Path("/out/01 - Intro.mp3"), Path("/out/02 - Song.mp3")]
-    FakePipeline.gate = None
-    monkeypatch.setattr(pipeline_worker_module, "DownloadSplitPipeline", FakePipeline)
-    return FakePipeline
-
-
-@pytest.fixture
-def fake_video(monkeypatch):
-    calls = []
-
-    def fetch(url, settings=None):
-        calls.append((url, settings))
-        return make_video()
-
-    monkeypatch.setattr(video_worker_module, "fetch_video_info", fetch)
-    monkeypatch.setattr(backend_module, "is_ffmpeg_available", lambda cmd: True)
-    return calls
-
-
-@pytest.fixture
-def qml_harness(qapp, settings, fake_video):
-    """Create and tear down the QML ApplicationWindow + AppBackend."""
-    backend = AppBackend(settings=settings)
-    backend.URL_DEBOUNCE_MS = 10
-
-    warnings = []
-    engine = create_qml_engine(backend)
-    engine.warnings.connect(lambda w_list: warnings.extend(w_list))
-
-    roots = engine.rootObjects()
-    assert roots, f"QML failed to load: {warnings}"
-    window: QQuickWindow = roots[0]
-    QTest.qWaitForWindowExposed(window)
-    qapp.processEvents()
-
-    yield window, backend, settings, warnings
-
-    backend._thread_pool.waitForDone(2000)
-    window.close()
-    qapp.processEvents()
-    del window
-    del roots
-    del engine
-    qapp.processEvents()
-
-
-def _walk_visual_items(item: QQuickItem, object_name: str) -> QQuickItem | None:
-    if item.objectName() == object_name:
-        return item
-    for child in item.childItems():
-        found = _walk_visual_items(child, object_name)
-        if found is not None:
-            return found
-    return None
-
-
-def find_item(window: QQuickWindow, object_name: str) -> QObject:
-    """Look up a QML object by objectName across both QObject and visual item trees."""
-    item = window.findChild(QObject, object_name)
-    if item is not None:
-        return item
-    if isinstance(window, QQuickWindow) and window.contentItem() is not None:
-        item = _walk_visual_items(window.contentItem(), object_name)
-    assert item is not None, f"QML item {object_name!r} not found"
-    return item
-
-
-def click_item(window: QQuickWindow, object_name: str) -> None:
-    """Click the center of a visible QQuickItem using QTest.mouseClick.
-
-    If the item is inside a Flickable/ScrollView and currently scrolled outside
-    the Flickable's viewport, scrolls the enclosing Flickable first.
-    """
-    item = find_item(window, object_name)
-    assert isinstance(item, QQuickItem), f"{object_name!r} is not a QQuickItem"
-    local_center = QPointF(item.width() / 2, item.height() / 2)
-    parent = item.parentItem()
-    while parent is not None:
-        if parent.metaObject().indexOfProperty("contentY") != -1:
-            in_flick = item.mapToItem(parent, local_center)
-            if in_flick.y() >= parent.height() or in_flick.y() < 0:
-                current_y = parent.property("contentY")
-                delta = in_flick.y() - (parent.height() / 2)
-                parent.setProperty("contentY", max(0.0, current_y + delta))
-                QApplication.processEvents()
-            break
-        parent = parent.parentItem()
-    center = item.mapToScene(local_center)
-    QTest.mouseClick(
-        window,
-        Qt.MouseButton.LeftButton,
-        Qt.KeyboardModifier.NoModifier,
-        center.toPoint(),
+def use_ai_http(monkeypatch, http_post) -> None:
+    """Make the backend build TracklistAiWorkers that post through http_post."""
+    monkeypatch.setattr(
+        backend_module,
+        "TracklistAiWorker",
+        partial(TracklistAiWorker, http_post=http_post),
     )
+
+
+def open_settings(window):
+    find_item(window, "settingsMenuAction").trigger(None)
     QApplication.processEvents()
-
-
-def set_text(window: QQuickWindow, object_name: str, value: str) -> None:
-    """Set the text property on a QML TextInput / TextArea and process events."""
-    item = find_item(window, object_name)
-    item.setProperty("text", value)
-    QApplication.processEvents()
-
-
-def prop(window: QQuickWindow, object_name: str, property_name: str = "text"):
-    """Read a QML property from a named item."""
-    return find_item(window, object_name).property(property_name)
-
-
-def wait_until(condition, timeout_ms: int = 2000, step_ms: int = 15) -> None:
-    """Spin the Qt event loop until condition() is truthy or timeout expires."""
-    deadline = time.monotonic() + (timeout_ms / 1000.0)
-    while time.monotonic() < deadline:
-        QApplication.processEvents()
-        if condition():
-            return
-        QTest.qWait(step_ms)
-    QApplication.processEvents()
-    assert condition(), "Timed out waiting for condition"
-
-
-def load_video(window: QQuickWindow, backend: AppBackend, url: str = VALID_URL) -> None:
-    set_text(window, "urlField", url)
-    wait_until(lambda: backend.videoLoaded)
-
-
-def fill_form(
-    window: QQuickWindow,
-    backend: AppBackend,
-    artist: str = "The Band",
-    output_dir: str = "/tmp",
-) -> None:
-    load_video(window, backend)
-    set_text(window, "tracklistArea", "Intro - 0:00\nSong - 4:30")
-    set_text(window, "artistField", artist)
-    set_text(window, "dirField", output_dir)
+    return find_item(window, "settingsPanel")
 
 
 class TestStartup:
     def test_loads_without_qml_warnings(self, qml_harness):
-        window, backend, _settings, warnings = qml_harness
-        assert warnings == []
+        window, _backend, _settings = qml_harness
         assert window.title() == "YouTube Bootlegger"
         assert prop(window, "msgOverlay", "visible") is False
 
-    def test_ffmpeg_missing_shows_warning_modal_on_startup(self, qapp, settings, monkeypatch):
+    def test_ffmpeg_missing_shows_warning_modal_on_startup(
+        self, qapp, app_settings, monkeypatch
+    ):
         monkeypatch.setattr(backend_module, "is_ffmpeg_available", lambda cmd: False)
-        backend = AppBackend(settings=settings)
-        engine = create_qml_engine(backend)
-        window = engine.rootObjects()[0]
-        QTest.qWaitForWindowExposed(window)
-        qapp.processEvents()
-
-        try:
+        backend = AppBackend(settings=app_settings)
+        with open_window(backend) as (window, warnings):
             assert backend.ffmpegMissing is True
             assert prop(window, "msgOverlay", "visible") is True
             assert prop(window, "msgTitle") == "FFmpeg Not Found"
@@ -272,16 +69,12 @@ class TestStartup:
 
             click_item(window, "msgCloseButton")
             assert prop(window, "msgOverlay", "visible") is False
-        finally:
-            window.close()
-            del window
-            del engine
-            qapp.processEvents()
+            assert warnings == []
 
 
 class TestVideoInfo:
     def test_valid_url_fetches_and_updates_qml_preview(self, qml_harness, fake_video):
-        window, backend, settings, _warnings = qml_harness
+        window, backend, settings = qml_harness
         load_video(window, backend)
 
         assert fake_video == [(VALID_URL, settings)]
@@ -290,17 +83,24 @@ class TestVideoInfo:
         assert prop(window, "videoDurationText") == "1:00:00"
         assert prop(window, "albumPlaceholderText") == "Live at the Venue"
 
+    def test_typed_url_fetches_once_after_debounce(self, qml_harness, fake_video):
+        window, backend, _settings = qml_harness
+        type_text(window, "urlField", VALID_URL)
+        wait_until(lambda: backend.videoLoaded)
+
+        assert [url for url, _ in fake_video] == [VALID_URL]
+
     def test_invalid_url_does_not_fetch(self, qml_harness, fake_video):
-        window, backend, _settings, _warnings = qml_harness
+        window, backend, _settings = qml_harness
         set_text(window, "urlField", "https://example.com/not-youtube")
-        QTest.qWait(50)
+        wait_for_workers(backend)
 
         assert fake_video == []
         assert backend.videoLoaded is False
         assert prop(window, "videoTitleText") == ""
 
     def test_fetch_error_is_displayed_in_qml(self, qml_harness, monkeypatch):
-        window, backend, _settings, _warnings = qml_harness
+        window, backend, _settings = qml_harness
 
         def failing_fetch(url, settings=None):
             raise ValidationError("Video unavailable")
@@ -318,23 +118,23 @@ class TestUrlEditing:
     def test_editing_url_clears_previous_video_immediately(
         self, qml_harness, fake_pipeline
     ):
-        window, backend, _settings, _warnings = qml_harness
+        window, backend, _settings = qml_harness
         fill_form(window, backend)
         assert prop(window, "albumPlaceholderText") == "Live at the Venue"
 
         backend.URL_DEBOUNCE_MS = 10_000
-        set_text(window, "urlField", "https://youtu.be/different")
+        set_text(window, "urlField", OTHER_URL)
 
         assert backend.videoLoaded is False
         assert prop(window, "videoTitleText") == ""
-        assert prop(window, "albumPlaceholderText") == "Defaults to video title"
+        assert prop(window, "albumPlaceholderText") == AppBackend.DEFAULT_ALBUM_PLACEHOLDER
 
         click_item(window, "startButton")
         assert fake_pipeline.instances == []
         assert "wait" in prop(window, "urlErrorText").lower()
 
     def test_returning_to_same_url_refetches(self, qml_harness, fake_video):
-        window, backend, settings, _warnings = qml_harness
+        window, backend, settings = qml_harness
         load_video(window, backend)
         assert len(fake_video) == 1
 
@@ -344,17 +144,89 @@ class TestUrlEditing:
         load_video(window, backend)
         assert fake_video == [(VALID_URL, settings), (VALID_URL, settings)]
 
-    def test_stale_video_result_is_ignored(self, qml_harness):
-        _window, backend, _settings, _warnings = qml_harness
-        backend._last_fetched_url = "https://youtu.be/new"
-        backend._on_video_info_loaded(make_video(title="Old"), url=VALID_URL)
-        assert backend.videoLoaded is False
-        assert backend.videoTitle == ""
+
+class TestOutOfOrderVideoResults:
+    """Slow responses for an earlier URL must never override the current one."""
+
+    def test_late_result_for_previous_url_is_ignored(self, qml_harness, gated_fetch):
+        window, backend, _settings = qml_harness
+        set_text(window, "urlField", VALID_URL)
+        wait_until(lambda: len(gated_fetch.calls) == 1)
+        set_text(window, "urlField", OTHER_URL)
+        wait_until(lambda: len(gated_fetch.calls) == 2)
+
+        gated_fetch.calls[1].succeed("Current Video")
+        wait_until(lambda: backend.videoLoaded)
+        gated_fetch.calls[0].succeed("Stale Video")
+        wait_for_workers(backend)
+
+        assert prop(window, "videoTitleText") == "Current Video"
+        assert prop(window, "albumPlaceholderText") == "Current Video"
+
+    def test_late_error_from_earlier_fetch_of_same_url_is_ignored(
+        self, qml_harness, gated_fetch
+    ):
+        window, backend, _settings = qml_harness
+        set_text(window, "urlField", VALID_URL)
+        wait_until(lambda: len(gated_fetch.calls) == 1)
+        set_text(window, "urlField", "not a url")
+        set_text(window, "urlField", VALID_URL)
+        wait_until(lambda: len(gated_fetch.calls) == 2)
+
+        gated_fetch.calls[0].fail("Transient network error")
+        wait_until(lambda: backend._thread_pool.activeThreadCount() == 1)
+        QApplication.processEvents()
+        gated_fetch.calls[1].succeed("Fresh Video")
+        wait_until(lambda: backend.videoLoaded)
+
+        assert prop(window, "videoTitleText") == "Fresh Video"
+        assert prop(window, "urlErrorText") == ""
+
+    def test_late_error_for_previous_url_is_ignored(self, qml_harness, gated_fetch):
+        window, backend, _settings = qml_harness
+        set_text(window, "urlField", VALID_URL)
+        wait_until(lambda: len(gated_fetch.calls) == 1)
+        set_text(window, "urlField", OTHER_URL)
+        wait_until(lambda: len(gated_fetch.calls) == 2)
+
+        gated_fetch.calls[1].succeed("Current Video")
+        wait_until(lambda: backend.videoLoaded)
+        gated_fetch.calls[0].fail("Old URL failed")
+        wait_for_workers(backend)
+
+        assert backend.videoLoaded is True
+        assert prop(window, "urlErrorText") == ""
+
+
+class TestMetadataFields:
+    def test_typed_artist_and_album_keep_spaces(self, qml_harness):
+        window, backend, _settings = qml_harness
+        type_text(window, "artistField", "Pink Floyd")
+        type_text(window, "albumField", "Live at Pompeii")
+
+        assert prop(window, "artistField") == "Pink Floyd"
+        assert prop(window, "albumField") == "Live at Pompeii"
+        assert backend.artistName == "Pink Floyd"
+        assert backend.albumName == "Live at Pompeii"
+
+    def test_surrounding_whitespace_is_trimmed_in_the_job(
+        self, qml_harness, fake_pipeline, tmp_path
+    ):
+        window, backend, _settings = qml_harness
+        fill_form(window, backend, artist="  Pink Floyd  ", output_dir=tmp_path)
+        type_text(window, "albumField", " Live at Pompeii ")
+
+        click_item(window, "startButton")
+        wait_until(lambda: not backend.busy and len(fake_pipeline.instances) == 1)
+
+        job = fake_pipeline.instances[0].job
+        assert job.artist == "Pink Floyd"
+        assert job.album == "Live at Pompeii"
 
 
 class TestPreview:
     def test_tracklist_preview_populates_listview_model(self, qml_harness):
-        window, backend, _settings, _warnings = qml_harness
+        window, backend, _settings = qml_harness
         set_text(window, "tracklistArea", "Opening - 0:00\nEncore - 4:32")
 
         preview_list = find_item(window, "previewList")
@@ -369,7 +241,7 @@ class TestPreview:
         assert model.data(idx0, model.IsValidRole) is True
 
     def test_bad_line_marks_preview_invalid(self, qml_harness):
-        window, backend, _settings, _warnings = qml_harness
+        window, backend, _settings = qml_harness
         set_text(window, "tracklistArea", "Opening - 0:00\nbad line without time")
 
         assert prop(window, "previewStatusText") == "1 error(s)"
@@ -380,17 +252,33 @@ class TestPreview:
         assert model.data(idx1, model.IsValidRole) is False
         assert model.data(idx1, model.ErrorRole) != ""
 
+    def test_typed_template_updates_preview(self, qml_harness):
+        window, backend, _settings = qml_harness
+        set_text(window, "tracklistArea", "0:00 Opening\n4:32 Encore")
+        type_text(window, "templateField", "%mm%:%ss% %songname%")
+
+        assert prop(window, "templateField") == "%mm%:%ss% %songname%"
+        assert backend.currentTemplate == "%mm%:%ss% %songname%"
+        assert prop(window, "previewStatusText") == "2 tracks"
+
     def test_invalid_template_shows_error_in_qml(self, qml_harness):
-        window, _backend, _settings, _warnings = qml_harness
-        set_text(window, "templateField", "%songname%")
+        window, _backend, _settings = qml_harness
+        type_text(window, "templateField", "%songname%")
 
         assert prop(window, "templateErrorText", "visible") is True
         assert prop(window, "templateErrorText") != ""
 
 
 class TestPipeline:
+    def test_fake_pipeline_matches_real_constructor(self):
+        real = inspect.signature(DownloadSplitPipeline.__init__).parameters
+        fake = inspect.signature(FakePipeline.__init__).parameters
+        assert list(fake) == list(real)
+        for method in ("execute", "cancel"):
+            assert callable(getattr(DownloadSplitPipeline, method))
+
     def test_start_without_url_shows_error(self, qml_harness, fake_pipeline):
-        window, _backend, _settings, _warnings = qml_harness
+        window, _backend, _settings = qml_harness
         click_item(window, "startButton")
 
         assert "Please enter a YouTube URL" in prop(window, "urlErrorText")
@@ -400,7 +288,7 @@ class TestPipeline:
     def test_start_without_artist_or_album_shows_metadata_error(
         self, qml_harness, fake_pipeline
     ):
-        window, backend, _settings, _warnings = qml_harness
+        window, backend, _settings = qml_harness
         fill_form(window, backend, artist="")
         click_item(window, "startButton")
 
@@ -411,7 +299,7 @@ class TestPipeline:
     def test_start_with_empty_output_dir_shows_dir_error(
         self, qml_harness, fake_pipeline
     ):
-        window, backend, _settings, _warnings = qml_harness
+        window, backend, _settings = qml_harness
         fill_form(window, backend, output_dir="")
         click_item(window, "startButton")
 
@@ -422,8 +310,8 @@ class TestPipeline:
     def test_successful_pipeline_run_updates_progress_and_shows_completion_modal(
         self, qml_harness, fake_pipeline, tmp_path
     ):
-        window, backend, settings, _warnings = qml_harness
-        fill_form(window, backend, output_dir=str(tmp_path))
+        window, backend, settings = qml_harness
+        fill_form(window, backend, output_dir=tmp_path)
 
         click_item(window, "startButton")
         wait_until(lambda: not backend.busy and len(fake_pipeline.instances) == 1)
@@ -446,8 +334,8 @@ class TestPipeline:
         self, qml_harness, fake_pipeline, tmp_path
     ):
         fake_pipeline.outcome = DownloadError("network down")
-        window, backend, _settings, _warnings = qml_harness
-        fill_form(window, backend, output_dir=str(tmp_path))
+        window, backend, _settings = qml_harness
+        fill_form(window, backend, output_dir=tmp_path)
 
         click_item(window, "startButton")
         wait_until(lambda: prop(window, "progressStageText") == "Error")
@@ -459,8 +347,8 @@ class TestPipeline:
 
     def test_cancel_running_job(self, qml_harness, fake_pipeline, tmp_path):
         fake_pipeline.gate = threading.Event()
-        window, backend, _settings, _warnings = qml_harness
-        fill_form(window, backend, output_dir=str(tmp_path))
+        window, backend, _settings = qml_harness
+        fill_form(window, backend, output_dir=tmp_path)
 
         click_item(window, "startButton")
         wait_until(lambda: "Downloading" in prop(window, "progressStageText"))
@@ -476,10 +364,26 @@ class TestPipeline:
         wait_until(lambda: not backend.busy)
         assert prop(window, "progressStageText") == "Cancelled"
 
+    def test_second_start_while_running_is_ignored(
+        self, qml_harness, fake_pipeline, tmp_path
+    ):
+        fake_pipeline.gate = threading.Event()
+        window, backend, _settings = qml_harness
+        fill_form(window, backend, output_dir=tmp_path)
+
+        click_item(window, "startButton")
+        wait_until(lambda: backend.busy)
+        click_item(window, "startButton")
+        backend.startPipeline()
+
+        fake_pipeline.gate.set()
+        wait_until(lambda: not backend.busy)
+        assert len(fake_pipeline.instances) == 1
+
 
 class TestAiAssist:
     def test_ai_button_disabled_until_video_and_tracklist_ready(self, qml_harness):
-        window, backend, _settings, _warnings = qml_harness
+        window, backend, _settings = qml_harness
         assert prop(window, "aiButtonRect", "enabled") is False
 
         set_text(window, "tracklistArea", "Intro - 0:00")
@@ -488,10 +392,10 @@ class TestAiAssist:
         load_video(window, backend)
         assert prop(window, "aiButtonRect", "enabled") is True
 
-    def test_api_provider_populates_template_artist_and_album(
+    def test_api_provider_overwrites_typed_template_artist_and_album(
         self, qml_harness, monkeypatch
     ):
-        window, backend, _settings, _warnings = qml_harness
+        window, backend, _settings = qml_harness
         backend.setLlmProvider(LlmProvider.OPENAI.value)
         backend.setOpenaiApiKey("sk-test-key")
 
@@ -510,12 +414,13 @@ class TestAiAssist:
             )
             return {"choices": [{"message": {"content": content}}]}
 
-        monkeypatch.setattr(ai_worker_module, "post_json", fake_post)
+        use_ai_http(monkeypatch, fake_post)
 
         load_video(window, backend)
-        # User manually edits fields first; AI Assist must still overwrite them in QML.
-        set_text(window, "templateField", "%songname% - %mm%:%ss%")
-        set_text(window, "artistField", "Manual Draft")
+        # The user types into the fields first; AI Assist must still replace them.
+        type_text(window, "templateField", "%songname% - %mm%:%ss%")
+        type_text(window, "artistField", "Manual Draft")
+        type_text(window, "albumField", "Manual Album")
         set_text(window, "tracklistArea", "0:00 Intro\n4:30 Song")
         assert prop(window, "aiButtonRect", "enabled") is True
 
@@ -533,14 +438,14 @@ class TestAiAssist:
     def test_api_provider_error_shows_message_overlay(
         self, qml_harness, monkeypatch
     ):
-        window, backend, _settings, _warnings = qml_harness
+        window, backend, _settings = qml_harness
         backend.setLlmProvider(LlmProvider.OPENAI.value)
         backend.setOpenaiApiKey("sk-bad-key")
 
         def failing_post(url, headers, body):
             raise LlmError("LLM request failed: HTTP 401: invalid api key")
 
-        monkeypatch.setattr(ai_worker_module, "post_json", failing_post)
+        use_ai_http(monkeypatch, failing_post)
 
         load_video(window, backend)
         set_text(window, "tracklistArea", "0:00 Intro\n4:30 Song")
@@ -554,7 +459,7 @@ class TestAiAssist:
     def test_chatgpt_lite_launches_and_shows_message_overlay(
         self, qml_harness, monkeypatch
     ):
-        window, backend, _settings, _warnings = qml_harness
+        window, backend, _settings = qml_harness
         called = []
 
         def fake_lite(title, text):
@@ -575,12 +480,11 @@ class TestAiAssist:
 
 class TestPanelsAndDialogs:
     def test_help_panel_opens_and_closes(self, qml_harness):
-        window, _backend, _settings, _warnings = qml_harness
+        window, _backend, _settings = qml_harness
         help_panel = find_item(window, "helpPanel")
         assert help_panel.property("open") is False
 
-        help_action = find_item(window, "helpMenuAction")
-        help_action.trigger(None)
+        find_item(window, "helpMenuAction").trigger(None)
         QApplication.processEvents()
 
         assert help_panel.property("open") is True
@@ -591,14 +495,11 @@ class TestPanelsAndDialogs:
         assert help_panel.property("open") is False
         assert help_panel.property("visible") is False
 
-    def test_settings_panel_edits_persist_on_done(self, qml_harness):
-        window, backend, settings, _warnings = qml_harness
-        settings_panel = find_item(window, "settingsPanel")
-        assert settings_panel.property("open") is False
-
-        settings_action = find_item(window, "settingsMenuAction")
-        settings_action.trigger(None)
-        QApplication.processEvents()
+    def test_settings_panel_edits_persist_across_restart(
+        self, qml_harness, settings_store
+    ):
+        window, backend, settings = qml_harness
+        settings_panel = open_settings(window)
         assert settings_panel.property("open") is True
 
         click_item(window, "externalYtdlpToggle")
@@ -610,10 +511,10 @@ class TestPanelsAndDialogs:
         assert prop(window, "anthropicSection", "visible") is True
         assert prop(window, "openaiSection", "visible") is False
 
-        set_text(window, "ytdlpPathField", "/opt/yt-dlp")
-        set_text(window, "ffmpegPathField", "/opt/ffmpeg")
-        set_text(window, "anthropicKeyField", "sk-ant-123")
-        set_text(window, "anthropicModelField", "claude-custom")
+        type_text(window, "ytdlpPathField", "/opt/yt-dlp")
+        type_text(window, "ffmpegPathField", "/opt/ffmpeg")
+        type_text(window, "anthropicKeyField", "sk-ant-123")
+        type_text(window, "anthropicModelField", "claude-custom")
 
         click_item(window, "settingsDoneButton")
 
@@ -625,3 +526,23 @@ class TestPanelsAndDialogs:
         assert settings.anthropic_api_key == "sk-ant-123"
         assert settings.anthropic_model == "claude-custom"
         assert backend.llmConfigured is True
+
+        # A fresh app reading the same stored settings shows the saved values.
+        reloaded = AppBackend(settings=AppSettings(settings_store))
+        with open_window(reloaded) as (window2, warnings):
+            open_settings(window2)
+            assert prop(window2, "ytdlpPathField") == "/opt/yt-dlp"
+            assert prop(window2, "ffmpegPathField") == "/opt/ffmpeg"
+            assert prop(window2, "anthropicSection", "visible") is True
+            assert prop(window2, "anthropicKeyField") == "sk-ant-123"
+            assert prop(window2, "anthropicModelField") == "claude-custom"
+            assert warnings == []
+
+    def test_settings_field_saves_on_enter_without_done(self, qml_harness):
+        window, _backend, settings = qml_harness
+        open_settings(window)
+
+        type_text(window, "ffmpegPathField", "/usr/local/bin/ffmpeg")
+        press_key(window, Qt.Key.Key_Return)
+
+        assert settings.ffmpeg_path == "/usr/local/bin/ffmpeg"
