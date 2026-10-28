@@ -15,8 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from youtube_bootlegger.core.exceptions import ValidationError
-from youtube_bootlegger.core.video_comments import DEFAULT_COMMENT_LIMIT, fetch_video_comments
-from youtube_bootlegger.core.video_info import fetch_video_info
+from youtube_bootlegger.core.video_info import DEFAULT_COMMENT_LIMIT, fetch_video_info
 
 
 def main():
@@ -37,8 +36,7 @@ def main():
             return args.external
 
     try:
-        info = fetch_video_info(args.url, ProbeSettings())
-        comments = fetch_video_comments(args.url, ProbeSettings(), limit=args.comments)
+        info = fetch_video_info(args.url, ProbeSettings(), comment_limit=args.comments)
     except ValidationError as exc:
         parser.exit(1, f"Could not inspect video: {exc}\n")
     print(json.dumps({
@@ -46,7 +44,7 @@ def main():
         "title": info.title,
         "description": info.description,
         "chapters": [asdict(chapter) for chapter in info.chapters],
-        "comments": [asdict(comment) for comment in comments],
+        "comments": [asdict(comment) for comment in info.comments],
     }, ensure_ascii=False, indent=2))
 
 

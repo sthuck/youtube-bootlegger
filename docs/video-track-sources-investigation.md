@@ -11,15 +11,19 @@ or new library is needed.
 | --- | --- | --- |
 | Chapters | `VideoInfo.chapters` (`VideoChapter`: title, start, end) | Convert directly to tracks; never send through an LLM |
 | Description | `VideoInfo.description` | Source text for AI track-list discovery |
-| Comments | `fetch_video_comments(url, settings, limit=20)` → `VideoComment`s | Each comment is a separate source for AI discovery |
+| Comments | `VideoInfo.comments` (`VideoComment`), with `fetch_video_info(..., comment_limit=N)` | Each comment is a separate source for AI discovery |
 
 - `core/ytdlp_metadata.py` is the single place that asks yt-dlp for metadata,
-  in both library and external-executable modes. `fetch_video_info` and
-  `fetch_video_comments` both use it, so the modes stay in parity and share
-  error messages.
-- Description and chapters arrive with the normal video preview at no extra
-  cost. Comments need a separate, slower request (they re-fetch the page and
-  then page through comments), so they're fetched only on demand.
+  in both library and external-executable modes, so they stay in parity and
+  share error messages.
+- Everything comes from **one** yt-dlp request. Description and chapters are
+  always included. Comments are added when `comment_limit > 0` (default 0, so
+  the preview doesn't fetch them yet); `DEFAULT_COMMENT_LIMIT` is 20. Twenty
+  comments are one comment page: measured at about +0.3 s over the ~2.7 s
+  metadata fetch, so the preview can afford to include them.
+- If a fetch with comments fails, it retries once without comments, so a
+  comment problem never loses the preview. The UI can't yet tell "no
+  comments" from "comments failed".
 - `scripts/probe_video_track_sources.py URL [--comments N] [--external yt-dlp]`
   prints all three as JSON, for checking real videos.
 
@@ -31,10 +35,9 @@ Behaviour worth knowing:
 - yt-dlp derives chapters from player data or, failing that, timestamps in the
   description, so chapter names may be intros or talk segments, not songs.
   Show them for review rather than assuming they were authored as a track list.
-- In library mode, comments are deferred by yt-dlp when not downloading;
-  `ydl.post_extract(info)` must run inside the `YoutubeDL` context to get them.
-- Comment fetches have a 120 s deadline in external mode; in library mode the
-  socket timeout and retry limits bound each request, not the total time.
+- Fetches with comments have a 120 s deadline in external mode (plus the
+  30 s retry); in library mode the socket timeout and retry limits bound each
+  request, not the total time.
   YouTube bot checks and extractor changes can still block retrieval.
 
 ## Remaining work
@@ -49,11 +52,10 @@ Behaviour worth knowing:
    description. Add a separate discovery operation and prompt that reuse the
    provider configuration (contract below). ChatGPT Lite needs its own
    copy/paste prompt flow.
-3. **Wire comments into the UI** as part of (2): fetch on the discovery action
-   from a worker / daemon thread, support cancellation, discard results if the
-   URL changed, and never overwrite user edits. If comments fail, still offer
-   description and chapter candidates. A comment status (not requested /
-   available / empty / failed) would let the UI explain an empty result.
+3. **Wire comments into the UI** as part of (2): pass `comment_limit` from
+   the existing preview fetch in all three front-ends, so discovery needs no
+   extra request. Never overwrite user edits. A comment status (not requested
+   / available / empty / failed) would let the UI explain an empty result.
 4. **Settings:** make the comment limit configurable (0–200, 0 disables).
    20 is a starting guess, not measured; tune with live probes on real
    concert videos.

@@ -25,11 +25,24 @@ def fetch_info_dict(url: str, settings: AppSettings, *, comment_limit: int = 0) 
         url: Video URL. Playlist parameters are ignored.
         settings: Selects the bundled library or the external executable.
         comment_limit: When positive, also fetch up to this many top-level
-            comments into info["comments"], in YouTube's Top order.
+            comments into info["comments"], in YouTube's Top order, in the
+            same request. If only the comments fail, the metadata is still
+            returned, without comments.
 
     Raises:
         ValidationError: If the video can't be fetched or isn't a single video.
     """
+    try:
+        return _fetch(url, settings, comment_limit)
+    except ValidationError:
+        if not comment_limit:
+            raise
+        # Comments are optional: retry once for the video's metadata alone,
+        # which also reports the real error if the video itself failed.
+        return _fetch(url, settings, 0)
+
+
+def _fetch(url: str, settings: AppSettings, comment_limit: int) -> dict:
     if settings.use_external_ytdlp:
         info = _fetch_external(url, settings, comment_limit)
     else:
@@ -70,12 +83,7 @@ def _fetch_library(url: str, comment_limit: int):
 
     try:
         with yt_dlp.YoutubeDL(options) as ydl:
-            info = ydl.extract_info(url, download=False)
-            # With download=False, yt-dlp defers comment extraction until
-            # post_extract, which must run while the downloader is still open.
-            if comment_limit and _is_single_video(info):
-                ydl.post_extract(info)
-            return info
+            return ydl.extract_info(url, download=False)
     except yt_dlp.utils.DownloadError as e:
         raise _fetch_error(str(e)) from e
     except Exception as e:
@@ -83,6 +91,17 @@ def _fetch_library(url: str, comment_limit: int):
 
 
 def _fetch_external(url: str, settings: AppSettings, comment_limit: int):
+    result = _run_external(url, settings, comment_limit)
+    if result.returncode != 0:
+        raise _fetch_error((result.stderr or result.stdout or "").strip())
+
+    try:
+        return json.loads(result.stdout)
+    except ValueError as e:
+        raise ValidationError("Could not parse yt-dlp output") from e
+
+
+def _run_external(url: str, settings: AppSettings, comment_limit: int):
     command = settings.resolved_ytdlp_command()
     cmd = [command, "--dump-single-json", "--no-warnings", "--no-playlist", "--skip-download"]
     timeout = METADATA_TIMEOUT_SECONDS
@@ -99,7 +118,7 @@ def _fetch_external(url: str, settings: AppSettings, comment_limit: int):
     cmd += ["--", url]
 
     try:
-        result = subprocess.run(
+        return subprocess.run(
             cmd,
             capture_output=True,
             text=True,
@@ -114,14 +133,6 @@ def _fetch_external(url: str, settings: AppSettings, comment_limit: int):
         raise ValidationError("Timed out fetching video information") from e
     except (OSError, UnicodeError) as e:
         raise ValidationError(f"Could not run yt-dlp: {e}") from e
-
-    if result.returncode != 0:
-        raise _fetch_error((result.stderr or result.stdout or "").strip())
-
-    try:
-        return json.loads(result.stdout)
-    except ValueError as e:
-        raise ValidationError("Could not parse yt-dlp output") from e
 
 
 def _fetch_error(message: str) -> ValidationError:

@@ -6,12 +6,15 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from urllib.parse import urlparse
 
+from .exceptions import ValidationError
 from .settings import AppSettings, get_settings
 from .ytdlp_metadata import fetch_info_dict
 
 # How many of the best-ranked thumbnails to consider before the fallback.
 MAX_THUMBNAIL_CANDIDATES = 4
 THUMBNAIL_PROBE_TIMEOUT_SECONDS = 5
+# Suggested comment_limit when looking for a set list in comments.
+DEFAULT_COMMENT_LIMIT = 20
 
 
 @dataclass(frozen=True)
@@ -21,6 +24,14 @@ class VideoChapter:
     title: str
     start_seconds: float
     end_seconds: float | None = None
+
+
+@dataclass(frozen=True)
+class VideoComment:
+    """A top-level comment's text, with yt-dlp's comment ID."""
+
+    comment_id: str
+    text: str
 
 
 @dataclass(frozen=True)
@@ -40,6 +51,7 @@ class VideoInfo:
         description: Video description text.
         chapters: Valid named chapters in video order. yt-dlp may derive these
             from timestamps in the description, so they aren't always songs.
+        comments: Top-level comments in YouTube's Top order, when requested.
     """
 
     video_id: str
@@ -53,6 +65,7 @@ class VideoInfo:
     thumbnail_candidates: tuple[str, ...] = ()
     description: str = ""
     chapters: tuple[VideoChapter, ...] = ()
+    comments: tuple[VideoComment, ...] = ()
 
     @property
     def formatted_views(self) -> str:
@@ -76,24 +89,35 @@ class VideoInfo:
         return f"{year}-{month}-{day}"
 
 
-def fetch_video_info(url: str, settings: AppSettings | None = None) -> VideoInfo:
+def fetch_video_info(
+    url: str,
+    settings: AppSettings | None = None,
+    *,
+    comment_limit: int = 0,
+) -> VideoInfo:
     """Fetch video information from YouTube URL.
 
     Args:
         url: YouTube video URL.
         settings: Application settings. Defaults to the shared singleton.
+        comment_limit: Also fetch up to this many top-level comments, in the
+            same request. Comments are skipped if they fail to load. YouTube's
+            ranking is dynamic, so repeated fetches may return different ones.
 
     Returns:
         VideoInfo object with video details.
 
     Raises:
-        ValidationError: If the URL is invalid or video unavailable.
+        ValidationError: If the URL is invalid, the video unavailable, or
+            comment_limit isn't a nonnegative integer.
     """
-    info = fetch_info_dict(url, settings or get_settings())
-    return resolve_thumbnail(_build_video_info(info))
+    if isinstance(comment_limit, bool) or not isinstance(comment_limit, int) or comment_limit < 0:
+        raise ValidationError("Comment limit must be a nonnegative integer")
+    info = fetch_info_dict(url, settings or get_settings(), comment_limit=comment_limit)
+    return resolve_thumbnail(_build_video_info(info, comment_limit))
 
 
-def _build_video_info(info: dict) -> VideoInfo:
+def _build_video_info(info: dict, comment_limit: int = 0) -> VideoInfo:
     """Build a VideoInfo from a yt-dlp info dict (Python API or CLI JSON)."""
     duration = info.get("duration", 0) or 0
     duration_string = _format_duration(duration)
@@ -113,6 +137,7 @@ def _build_video_info(info: dict) -> VideoInfo:
         thumbnail_candidates=tuple(candidates),
         description=info.get("description") or "",
         chapters=parse_chapters(info.get("chapters")),
+        comments=parse_comments(info.get("comments"), comment_limit),
     )
 
 
@@ -138,6 +163,20 @@ def parse_chapters(chapters) -> tuple[VideoChapter, ...]:
         if end is not None and end <= start:
             continue
         result.append(VideoChapter(title, start, end))
+    return tuple(result)
+
+
+def parse_comments(comments, limit: int) -> tuple[VideoComment, ...]:
+    """Keep up to `limit` nonblank top-level comments, in their given order."""
+    result = []
+    for comment in comments or []:
+        if len(result) >= limit:
+            break
+        if not isinstance(comment, dict) or comment.get("parent") not in (None, "root"):
+            continue
+        text = comment.get("text")
+        if isinstance(text, str) and text.strip():
+            result.append(VideoComment(str(comment.get("id") or ""), text))
     return tuple(result)
 
 

@@ -12,8 +12,7 @@ from .downloader import AudioDownloader
 from .splitter import AudioSplitter
 from .pipeline import DownloadSplitPipeline
 from .settings import AppSettings, get_settings
-from .video_info import VideoChapter, VideoInfo, fetch_video_info
-from .video_comments import VideoComment, fetch_video_comments
+from .video_info import VideoChapter, VideoComment, VideoInfo, fetch_video_info
 from .template_parser import (
     DEFAULT_TEMPLATE,
     ParsePreview,
@@ -37,10 +36,9 @@ __all__ = [
     "AppSettings",
     "get_settings",
     "VideoChapter",
+    "VideoComment",
     "VideoInfo",
     "fetch_video_info",
-    "VideoComment",
-    "fetch_video_comments",
     "DEFAULT_TEMPLATE",
     "ParsePreview",
     "TrackPreview",

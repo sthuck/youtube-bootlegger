@@ -27,7 +27,7 @@ uv run python main_tui.py
 
 - `core/`, `llm/`, `models/`, `utils/`: business logic. Only `PySide6.QtCore` (`QSettings`) is required, so all three UIs share `core/settings.py` and the same settings file.
 - `app_logic/`: UI-agnostic glue shared by the front-ends (form validation → `DownloadJob`, preview/progress/video display strings, help content). Put behaviour here rather than duplicating it per UI.
-- `core/ytdlp_metadata.py` is the only place that asks yt-dlp for metadata (bundled library or external executable per settings); `fetch_video_info` and `fetch_video_comments` build on it. Track-source plans are in `docs/video-track-sources-investigation.md`.
+- `core/ytdlp_metadata.py` is the only place that asks yt-dlp for metadata (bundled library or external executable per settings); `fetch_video_info` builds on it and returns description, chapters and (with `comment_limit`) comments from a single request. Track-source plans are in `docs/video-track-sources-investigation.md`.
 - `ui/` (widgets), `qml/` + `qml_backend/` (QML), `tui/` (Textual) are the three front-ends.
 - `llm/chatgpt_lite.py` takes injectable `open_url`/`copy_text` callables; Qt implementations are the default, the TUI passes its own.
 

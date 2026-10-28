@@ -79,6 +79,27 @@ class TestExternal:
         with pytest.raises(ValidationError, match="HTTP 429"):
             metadata.fetch_info_dict(URL, make_settings(use_external=True))
 
+    def test_comment_failure_retries_once_without_comments(self, monkeypatch):
+        run = Mock(side_effect=[
+            subprocess.CompletedProcess([], 1, "", "ERROR: comment API failed"),
+            subprocess.CompletedProcess([], 0, json.dumps(PAYLOAD), ""),
+        ])
+        monkeypatch.setattr(metadata.subprocess, "run", run)
+
+        info = metadata.fetch_info_dict(URL, make_settings(use_external=True), comment_limit=5)
+
+        assert info == PAYLOAD
+        first, retry = (call.args[0] for call in run.call_args_list)
+        assert "--write-comments" in first
+        assert "--write-comments" not in retry
+
+    def test_unavailable_video_with_comments_reports_video_error(self, monkeypatch):
+        run = fake_run(returncode=1, stderr="ERROR: Video unavailable")
+        monkeypatch.setattr(metadata.subprocess, "run", run)
+        with pytest.raises(ValidationError, match="^This video is unavailable$"):
+            metadata.fetch_info_dict(URL, make_settings(use_external=True), comment_limit=5)
+        assert run.call_count == 2
+
     @pytest.mark.parametrize("error,match", [
         (subprocess.TimeoutExpired("yt-dlp", 30), "Timed out"),
         (PermissionError("denied"), "Could not run"),
@@ -96,7 +117,7 @@ class TestExternal:
 
 
 class FixtureIE(InfoExtractor):
-    """Offline extractor whose comments are deferred, like YouTube's."""
+    """Offline extractor that provides comments the way YouTube's does."""
 
     _VALID_URL = r"fixture:(?P<id>\w+)"
 
@@ -107,14 +128,20 @@ class FixtureIE(InfoExtractor):
         }
 
     def _get_comments(self):
-        yield {"id": "deferred", "text": "Set list", "parent": "root"}
+        yield {"id": "fixture-comment", "text": "Set list", "parent": "root"}
+
+
+class BrokenCommentsIE(FixtureIE):
+    def _get_comments(self):
+        raise RuntimeError("comment API changed")
+        yield
 
 
 class TestLibrary:
     """The bundled yt-dlp library path."""
 
     @pytest.mark.parametrize("limit", [0, 2])
-    def test_runs_deferred_comments_only_when_requested(self, monkeypatch, limit):
+    def test_fetches_comments_only_when_requested(self, monkeypatch, limit):
         original = yt_dlp.YoutubeDL
         options_seen = []
 
@@ -130,13 +157,26 @@ class TestLibrary:
         assert info["title"] == PAYLOAD["title"]
         assert options_seen[0]["noplaylist"] and options_seen[0]["skip_download"]
         if limit:
-            assert [c["id"] for c in info["comments"]] == ["deferred"]
+            assert [c["id"] for c in info["comments"]] == ["fixture-comment"]
             assert options_seen[0]["extractor_args"]["youtube"] == {
                 "comment_sort": ["top"], "max_comments": ["2", "2", "0", "0"],
             }
         else:
             assert not info.get("comments")
             assert "getcomments" not in options_seen[0]
+
+    def test_comment_failure_keeps_metadata(self, monkeypatch):
+        original = yt_dlp.YoutubeDL
+
+        def downloader(options):
+            ydl = original(options, auto_init=False)
+            ydl.add_info_extractor(BrokenCommentsIE())
+            return ydl
+
+        monkeypatch.setattr(metadata.yt_dlp, "YoutubeDL", downloader)
+        info = metadata.fetch_info_dict("fixture:test", make_settings(), comment_limit=2)
+        assert info["description"] == PAYLOAD["description"]
+        assert not info.get("comments")
 
     def test_private_video_gets_friendly_message(self, monkeypatch):
         monkeypatch.setattr(metadata.yt_dlp, "YoutubeDL", Mock(

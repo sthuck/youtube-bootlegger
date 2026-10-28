@@ -1,10 +1,18 @@
-"""Unit tests for video info helpers: metadata, chapters and thumbnails."""
+"""Unit tests for video info helpers: metadata, track sources and thumbnails."""
 
+from unittest.mock import Mock
+
+import pytest
+
+import src.youtube_bootlegger.core.video_info as vi
+from src.youtube_bootlegger.core.exceptions import ValidationError
 from src.youtube_bootlegger.core.settings import AppSettings
 from src.youtube_bootlegger.core.video_info import (
     VideoChapter,
+    VideoComment,
     _build_video_info,
     parse_chapters,
+    parse_comments,
     resolve_thumbnail,
     thumbnail_candidates,
 )
@@ -92,6 +100,53 @@ class TestChaptersAndDescription:
         assert chapters == (VideoChapter(" 演奏 ", 3600.5),)
 
 
+# Like counts intentionally differ from YouTube's order, which must be kept.
+COMMENTS = [
+    {"id": "a", "text": "0:00 One\n1:05 Two", "parent": "root", "like_count": 1},
+    {"id": "reply", "text": "A reply", "parent": "a"},
+    {"id": "blank", "text": "   ", "parent": "root"},
+    {"id": "b", "text": "Another list", "parent": "root", "like_count": 100},
+    {"id": "c", "text": "Third", "parent": "root"},
+]
+
+
+class TestComments:
+    """Comments are fetched in the same request as the rest of the info."""
+
+    @pytest.fixture
+    def fetch(self, monkeypatch):
+        fetch = Mock(return_value={"id": "", "comments": COMMENTS})
+        monkeypatch.setattr(vi, "fetch_info_dict", fetch)
+        monkeypatch.setattr(vi, "_url_exists", lambda url: False)
+        return fetch
+
+    def test_one_request_returns_top_level_comments_in_order(self, fetch):
+        settings = AppSettings(FakeSettingsBackend())
+        info = vi.fetch_video_info("https://youtu.be/x", settings, comment_limit=2)
+        assert info.comments == (
+            VideoComment("a", "0:00 One\n1:05 Two"), VideoComment("b", "Another list"),
+        )
+        fetch.assert_called_once_with("https://youtu.be/x", settings, comment_limit=2)
+
+    def test_not_requested_by_default(self, fetch):
+        info = vi.fetch_video_info("https://youtu.be/x", AppSettings(FakeSettingsBackend()))
+        assert info.comments == ()
+        assert fetch.call_args.kwargs == {"comment_limit": 0}
+
+    @pytest.mark.parametrize("limit", [-1, 2.5, "20", True, None])
+    def test_invalid_limit_rejected_before_fetch(self, fetch, limit):
+        with pytest.raises(ValidationError, match="nonnegative integer"):
+            vi.fetch_video_info("https://youtu.be/x", comment_limit=limit)
+        fetch.assert_not_called()
+
+    @pytest.mark.parametrize("raw", [None, [], [None, {}, {"text": 5}]])
+    def test_absent_or_unusable_comments(self, raw):
+        assert parse_comments(raw, 20) == ()
+
+    def test_comment_without_id_keeps_text(self):
+        assert parse_comments([{"text": "Set list"}], 20) == (VideoComment("", "Set list"),)
+
+
 ZOO_ID = "jNQXAC9IVRw"
 
 
@@ -161,13 +216,11 @@ class TestResolveThumbnail:
         assert resolve_thumbnail(info, url_exists=lambda url: False) == info
 
     def test_fetch_video_info_resolves_thumbnail(self, monkeypatch):
-        import src.youtube_bootlegger.core.video_info as vi
-
         settings = AppSettings(FakeSettingsBackend())
         monkeypatch.setattr(
             vi,
             "fetch_info_dict",
-            lambda url, settings: {"id": ZOO_ID, "thumbnails": yt_thumbnails(ZOO_ID)},
+            lambda url, settings, comment_limit: {"id": ZOO_ID, "thumbnails": yt_thumbnails(ZOO_ID)},
         )
         monkeypatch.setattr(vi, "_url_exists", lambda url: url.endswith("/hqdefault.jpg"))
         info = vi.fetch_video_info("https://youtu.be/" + ZOO_ID, settings)
