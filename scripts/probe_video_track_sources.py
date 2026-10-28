@@ -2,7 +2,7 @@
 
 Run: uv run python scripts/probe_video_track_sources.py URL --comments 20
 Use --external yt-dlp to inspect an external executable instead of the library.
-JSON goes to stdout; yt-dlp diagnostics go to stderr.
+Prints the description, chapters and comments as JSON.
 """
 
 import argparse
@@ -15,19 +15,21 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from youtube_bootlegger.core.exceptions import ValidationError
-from youtube_bootlegger.core.video_sources import fetch_video_sources
+from youtube_bootlegger.core.video_comments import DEFAULT_COMMENT_LIMIT, fetch_video_comments
+from youtube_bootlegger.core.video_info import fetch_video_info
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("url")
-    parser.add_argument("--comments", type=int, default=20,
+    parser.add_argument("--comments", type=int, default=DEFAULT_COMMENT_LIMIT,
                         help="Maximum top-level comments; 0 skips comment fetching")
     parser.add_argument("--external", metavar="EXECUTABLE")
     args = parser.parse_args()
     if args.comments < 0:
         parser.error("--comments must be nonnegative")
-    # Use command-line mode selection without changing the user's saved settings.
+
+    # Select the yt-dlp mode from the command line without touching saved settings.
     class ProbeSettings:
         use_external_ytdlp = args.external is not None
 
@@ -35,12 +37,17 @@ def main():
             return args.external
 
     try:
-        sources = fetch_video_sources(
-            args.url, ProbeSettings(), comment_limit=args.comments,
-        )
+        info = fetch_video_info(args.url, ProbeSettings())
+        comments = fetch_video_comments(args.url, ProbeSettings(), limit=args.comments)
     except ValidationError as exc:
         parser.exit(1, f"Could not inspect video: {exc}\n")
-    print(json.dumps(asdict(sources), ensure_ascii=False, indent=2))
+    print(json.dumps({
+        "video_id": info.video_id,
+        "title": info.title,
+        "description": info.description,
+        "chapters": [asdict(chapter) for chapter in info.chapters],
+        "comments": [asdict(comment) for comment in comments],
+    }, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

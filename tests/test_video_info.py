@@ -1,12 +1,10 @@
-"""Unit tests for video info fetching helpers, including external yt-dlp mode."""
+"""Unit tests for video info helpers: metadata, chapters and thumbnails."""
 
-import pytest
-
-from src.youtube_bootlegger.core.exceptions import ValidationError
 from src.youtube_bootlegger.core.settings import AppSettings
 from src.youtube_bootlegger.core.video_info import (
+    VideoChapter,
     _build_video_info,
-    _fetch_video_info_external,
+    parse_chapters,
     resolve_thumbnail,
     thumbnail_candidates,
 )
@@ -26,13 +24,6 @@ class FakeSettingsBackend:
 
     def sync(self):
         pass
-
-
-def make_settings(ytdlp_path=""):
-    settings = AppSettings(FakeSettingsBackend())
-    settings.use_external_ytdlp = True
-    settings.ytdlp_path = ytdlp_path
-    return settings
 
 
 class TestBuildVideoInfo:
@@ -70,54 +61,35 @@ class TestBuildVideoInfo:
         assert video_info.title == "Unknown Title"
 
 
-class TestFetchVideoInfoExternal:
-    """Tests for _fetch_video_info_external using a fake yt-dlp executable."""
+class TestChaptersAndDescription:
+    """Tests for the track-list sources kept from the yt-dlp info dict."""
 
-    def test_missing_executable_raises_validation_error(self):
-        settings = make_settings(ytdlp_path="/nonexistent/yt-dlp")
+    def test_keeps_description_and_valid_chapters(self):
+        info = _build_video_info({
+            "description": "0:00 One\n1:05 Two",
+            "chapters": [
+                {"title": "One", "start_time": 0, "end_time": 65},
+                {"title": "Two", "start_time": 65.5, "end_time": 150},
+            ],
+        })
+        assert info.description == "0:00 One\n1:05 Two"
+        assert info.chapters == (VideoChapter("One", 0, 65), VideoChapter("Two", 65.5, 150))
 
-        with pytest.raises(ValidationError) as exc_info:
-            _fetch_video_info_external("https://youtu.be/abc", settings)
+    def test_missing_sources_are_empty(self):
+        info = _build_video_info({"description": None, "chapters": None})
+        assert info.description == ""
+        assert info.chapters == ()
 
-        assert "/nonexistent/yt-dlp" in str(exc_info.value)
-
-    def test_parses_json_output_from_fake_executable(self, tmp_path):
-        fake_ytdlp = tmp_path / "fake-yt-dlp.py"
-        fake_ytdlp.write_text(
-            "#!/usr/bin/env python3\n"
-            "import json\n"
-            "print(json.dumps({"
-            "'id': 'xyz', 'title': 'Fake Video', 'channel': 'Fake Channel', "
-            "'duration': 61, 'thumbnails': [], 'view_count': 42, "
-            "'upload_date': '20230101'}))\n"
-        )
-        fake_ytdlp.chmod(0o755)
-
-        settings = make_settings(ytdlp_path=str(fake_ytdlp))
-
-        video_info = _fetch_video_info_external("https://youtu.be/xyz", settings)
-
-        assert video_info.video_id == "xyz"
-        assert video_info.title == "Fake Video"
-        assert video_info.duration_string == "1:01"
-        assert video_info.view_count == 42
-
-    def test_nonzero_exit_raises_validation_error(self, tmp_path):
-        fake_ytdlp = tmp_path / "fake-yt-dlp-fail.py"
-        fake_ytdlp.write_text(
-            "#!/usr/bin/env python3\n"
-            "import sys\n"
-            "print('ERROR: Video unavailable', file=sys.stderr)\n"
-            "sys.exit(1)\n"
-        )
-        fake_ytdlp.chmod(0o755)
-
-        settings = make_settings(ytdlp_path=str(fake_ytdlp))
-
-        with pytest.raises(ValidationError) as exc_info:
-            _fetch_video_info_external("https://youtu.be/xyz", settings)
-
-        assert "unavailable" in str(exc_info.value).lower()
+    def test_skips_unusable_chapters_without_changing_valid_names(self):
+        chapters = parse_chapters([
+            None, {}, {"title": "", "start_time": 0},
+            {"title": "Bad", "start_time": float("nan")},
+            {"title": "Bad", "start_time": -1},
+            {"title": "Bad", "start_time": True},
+            {"title": "Bad", "start_time": 10, "end_time": 5},
+            {"title": " 演奏 ", "start_time": 3600.5},
+        ])
+        assert chapters == (VideoChapter(" 演奏 ", 3600.5),)
 
 
 ZOO_ID = "jNQXAC9IVRw"
@@ -194,8 +166,8 @@ class TestResolveThumbnail:
         settings = AppSettings(FakeSettingsBackend())
         monkeypatch.setattr(
             vi,
-            "_fetch_video_info_library",
-            lambda url: _build_video_info({"id": ZOO_ID, "thumbnails": yt_thumbnails(ZOO_ID)}),
+            "fetch_info_dict",
+            lambda url, settings: {"id": ZOO_ID, "thumbnails": yt_thumbnails(ZOO_ID)},
         )
         monkeypatch.setattr(vi, "_url_exists", lambda url: url.endswith("/hqdefault.jpg"))
         info = vi.fetch_video_info("https://youtu.be/" + ZOO_ID, settings)
