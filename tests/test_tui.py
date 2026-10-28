@@ -611,6 +611,17 @@ class TestTrackFinder:
             )
             assert fake_find.calls == []
 
+    async def test_log_requests_switch_persists(self, api_settings, fake_video):
+        app = make_app(api_settings)
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.press("f2")
+            switch = app.screen.query_one("#setting-log-ai-requests")
+            assert switch.value is False
+            switch.value = True
+            await pilot.click("#settings-save")
+            await pilot.pause()
+            assert api_settings.log_ai_requests is True
+
     async def test_settings_switch_persists(self, api_settings, fake_video):
         app = make_app(api_settings)
         async with app.run_test(size=SIZE) as pilot:
@@ -650,6 +661,18 @@ class TestDialogs:
             assert settings.ffmpeg_path == "/opt/ffmpeg"
             assert settings.llm_provider == LlmProvider.ANTHROPIC
             assert settings.anthropic_api_key == "key-123"
+
+    @pytest.mark.parametrize("size", [(80, 24), (100, 30), (160, 50)])
+    async def test_settings_buttons_fit_on_screen(self, settings, fake_video, size):
+        settings.llm_provider = LlmProvider.OPENAI_COMPATIBLE  # Tallest provider form.
+        app = make_app(settings)
+        async with app.run_test(size=size) as pilot:
+            await pilot.press("f2")
+            await pilot.pause()
+            for button_id in ("#settings-save", "#settings-cancel"):
+                region = app.screen.query_one(button_id).region
+                assert region.height > 0
+                assert region.bottom <= size[1], f"{button_id} is off screen at {size}"
 
     async def test_settings_cancel_discards(self, settings, fake_video):
         app = make_app(settings)

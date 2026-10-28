@@ -246,9 +246,14 @@ ModalScreen {
     dock: bottom;
 }
 
+/* Fill what's left of the dialog (capped at 90% of the screen) so the
+   buttons below always stay visible; the body scrolls instead. */
+#settings-dialog {
+    height: 90%;
+}
+
 #settings-body {
-    height: auto;
-    max-height: 30;
+    height: 1fr;
 }
 
 #settings-dialog .field-error {

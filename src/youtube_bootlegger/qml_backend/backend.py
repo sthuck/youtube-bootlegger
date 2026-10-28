@@ -12,6 +12,8 @@ from PySide6.QtCore import (
 )
 
 from ..app_logic import (
+    AI_PROVIDERS_NOTE,
+    LOG_AI_REQUESTS_LABEL,
     AiButtonMode,
     CancelReason,
     FormError,
@@ -25,6 +27,7 @@ from ..app_logic import (
     build_help_content,
     build_job,
     check_ai_assist_ready,
+    log_ai_requests_note,
     check_find_ready,
     format_progress_stage,
     preview_comment_limit,
@@ -110,6 +113,7 @@ class AppBackend(QObject):
     apiHintVisibleChanged = Signal()
     templateSetByAiChanged = Signal()
     autoFindTracklistChanged = Signal()
+    logAiRequestsChanged = Signal()
 
     showMessage = Signal(str, str, bool)  # title, message, isError
 
@@ -166,6 +170,7 @@ class AppBackend(QObject):
     autoFindTracklist = Property(
         bool, _getter("_auto_find_tracklist"), notify=autoFindTracklistChanged
     )
+    logAiRequests = Property(bool, _getter("_log_ai_requests"), notify=logAiRequestsChanged)
     # Every track-finder string comes from app_logic, so all UIs read alike.
     findTexts = Property("QVariantMap", _getter("_find_texts"), constant=True)
 
@@ -245,6 +250,7 @@ class AppBackend(QObject):
         self._api_hint_visible = False
         self._template_set_by_ai = False
         self._auto_find_tracklist = self._app_settings.auto_find_tracklist
+        self._log_ai_requests = self._app_settings.log_ai_requests
         self._find_texts = {
             "searching": finder_text.SEARCHING_TEXT,
             "stop": finder_text.STOP_BUTTON_LABEL,
@@ -254,6 +260,9 @@ class AppBackend(QObject):
             "openSettings": finder_text.OPEN_SETTINGS_LABEL,
             "autoFindLabel": finder_text.AUTO_FIND_SETTING_LABEL,
             "autoFindNote": finder_text.AUTO_FIND_SETTING_NOTE,
+            "aiProvidersNote": AI_PROVIDERS_NOTE,
+            "logRequestsLabel": LOG_AI_REQUESTS_LABEL,
+            "logRequestsNote": log_ai_requests_note(self._app_settings),
         }
 
         self._track_model = TrackPreviewModel(self)
@@ -489,6 +498,12 @@ class AppBackend(QObject):
         self._app_settings.auto_find_tracklist = enabled
         self._app_settings.sync()
         self._emit("_auto_find_tracklist", enabled, self.autoFindTracklistChanged)
+
+    @Slot(bool)
+    def setLogAiRequests(self, enabled):
+        self._app_settings.log_ai_requests = enabled
+        self._app_settings.sync()
+        self._emit("_log_ai_requests", enabled, self.logAiRequestsChanged)
 
     @Slot()
     def stopFind(self):

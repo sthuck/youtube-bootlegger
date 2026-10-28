@@ -240,6 +240,9 @@ def open_window(backend: AppBackend):
         try:
             yield window, warnings
         finally:
+            # A pending debounce would otherwise fire during a later test's
+            # event processing, after this test's fakes are gone.
+            backend._url_debounce.stop()
             backend._thread_pool.waitForDone(2000)
             window.close()
             app.processEvents()

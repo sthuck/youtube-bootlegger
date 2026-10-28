@@ -3,10 +3,13 @@
 from .help_content import build_help_content
 from .job_builder import FormError, FormField, JobForm, build_job
 from .presentation import (
+    AI_PROVIDERS_NOTE,
+    LOG_AI_REQUESTS_LABEL,
     PreviewSummary,
     VideoSummary,
     check_ai_assist_ready,
     format_progress_stage,
+    log_ai_requests_note,
     summarize_preview,
     summarize_video,
 )
@@ -28,6 +31,9 @@ from .track_finder import (
 )
 
 __all__ = [
+    "AI_PROVIDERS_NOTE",
+    "LOG_AI_REQUESTS_LABEL",
+    "log_ai_requests_note",
     "AiButtonMode",
     "CancelReason",
     "FindApplication",

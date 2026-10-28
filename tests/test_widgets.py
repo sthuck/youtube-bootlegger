@@ -9,7 +9,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QDialogButtonBox
 
 from src.youtube_bootlegger.app_logic.track_finder import (
     API_HINT_TEXT,
@@ -316,6 +316,15 @@ class TestManualButton:
         assert len(detect) == 1
 
 
+def test_settings_dialog_saves_log_ai_requests(widgets_app, settings):
+    dialog = SettingsDialog(settings=settings)
+    assert not dialog._log_requests_checkbox.isChecked()
+    dialog._log_requests_checkbox.setChecked(True)
+    dialog._on_save()
+    assert settings.log_ai_requests is True
+    dialog.deleteLater()
+
+
 def test_settings_dialog_saves_auto_find(widgets_app, settings):
     dialog = SettingsDialog(settings=settings)
     assert dialog._auto_find_checkbox.isChecked()
@@ -323,3 +332,15 @@ def test_settings_dialog_saves_auto_find(widgets_app, settings):
     dialog._on_save()
     assert settings.auto_find_tracklist is False
     dialog.deleteLater()
+
+
+def test_settings_dialog_fits_screen_with_buttons_visible(widgets_app, settings):
+    dialog = SettingsDialog(settings=settings)
+    dialog.show()
+    widgets_app.processEvents()
+    available = dialog.screen().availableGeometry()
+    assert dialog.height() <= max(available.height(), dialog.minimumHeight())
+    save = dialog.findChild(QDialogButtonBox)
+    assert save.isVisible()
+    assert save.geometry().bottom() <= dialog.height()
+    dialog.close()

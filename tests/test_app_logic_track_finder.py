@@ -195,6 +195,8 @@ class TestSessionComplete:
         assert application.log == (
             LogLine("AI: found 2 timestamped tracks in comment #3"),
             LogLine(f'AI: format set to "{FIND_TEMPLATE}"'),
+            LogLine('AI: artist set to "Band"'),
+            LogLine('AI: album set to "Live 2024"'),
         )
         assert session.ai_filled
 
@@ -208,17 +210,21 @@ class TestSessionComplete:
     def test_keeps_users_artist_and_album(self):
         session = TrackFinderSession()
         current = FormValues("", "t", "My Artist", "My Album")
-        values = session.complete(session.begin("vid"), "vid", FOUND, current).values
-        assert (values.artist, values.album) == ("My Artist", "My Album")
-
-    def test_box_filled_meanwhile_is_left_alone(self):
-        session = TrackFinderSession()
-        current = FormValues("Mine - 0:00", "t", "", "")
         application = session.complete(session.begin("vid"), "vid", FOUND, current)
-        assert application.values is None and application.banner == ""
-        assert application.log == (LogLine(
-            "AI: found a track list, but you'd already filled one in; left it unchanged",
-            "warn"),)
+        assert (application.values.artist, application.values.album) == ("My Artist", "My Album")
+        assert not any("artist" in line.text or "album" in line.text for line in application.log)
+
+    def test_box_filled_meanwhile_keeps_list_but_fills_blank_metadata(self):
+        session = TrackFinderSession()
+        current = FormValues("Mine - 0:00", "t", "", "Mine")
+        application = session.complete(session.begin("vid"), "vid", FOUND, current)
+        assert application.values == FormValues("Mine - 0:00", "t", "Band", "Mine")
+        assert application.banner == ""
+        assert application.log == (
+            LogLine("AI: found a track list, but you'd already filled one in; "
+                    "left it unchanged", "warn"),
+            LogLine('AI: artist set to "Band"'),
+        )
         assert not session.ai_filled
 
     def test_untimed(self):
@@ -238,6 +244,20 @@ class TestSessionComplete:
         assert application.values is None
         assert application.log == (
             LogLine("AI: no track list found in the description, chapters or comments"),)
+
+    @pytest.mark.parametrize("outcome", [FindOutcome.NOT_FOUND, FindOutcome.UNTIMED])
+    def test_without_list_still_fills_blank_artist_and_album(self, outcome):
+        source = TrackSource("description", "the description", "A\nB")
+        result = TracklistFindResult(
+            outcome, source if outcome == FindOutcome.UNTIMED else None,
+            artist_name="Band", album_name="Live 2024")
+        session = TrackFinderSession()
+        current = FormValues("", "t", "", "")
+        application = session.complete(session.begin("vid"), "vid", result, current)
+        assert application.values == FormValues("", "t", "Band", "Live 2024")
+        assert application.banner == "" and not session.ai_filled
+        assert application.log[1:] == (
+            LogLine('AI: artist set to "Band"'), LogLine('AI: album set to "Live 2024"'))
 
 
 class TestSessionAfterFill:

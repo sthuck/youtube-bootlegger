@@ -1,5 +1,7 @@
 """Settings dialog for configuring external tool paths and LLM providers."""
 
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -18,6 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ...app_logic import AI_PROVIDERS_NOTE, LOG_AI_REQUESTS_LABEL, log_ai_requests_note
 from ...app_logic.track_finder import AUTO_FIND_SETTING_LABEL, AUTO_FIND_SETTING_NOTE
 from ...llm import (
     DEFAULT_ANTHROPIC_MODEL,
@@ -28,6 +31,10 @@ from ...llm import (
 from ...core.settings import AppSettings, LlmProvider, get_settings
 
 
+PREFERRED_HEIGHT = 640
+MIN_HEIGHT = 320
+
+
 class SettingsDialog(QDialog):
     """Modal dialog for editing persisted application settings."""
 
@@ -36,9 +43,23 @@ class SettingsDialog(QDialog):
         self._settings = settings or get_settings()
         self.setWindowTitle("Settings")
         self.setMinimumWidth(520)
-        self.setMinimumHeight(560)
+        self.setMinimumHeight(MIN_HEIGHT)
         self._setup_ui()
         self._load_settings()
+        self._fit_to_screen()
+
+    def _fit_to_screen(self) -> None:
+        """Open at a comfortable height that never exceeds the screen.
+
+        The settings scroll and Save/Cancel stay below them, so a short
+        screen only shortens the scroll area.
+        """
+        parent = self.parentWidget()
+        screen = (parent.screen() if parent else None) or QGuiApplication.primaryScreen()
+        height = PREFERRED_HEIGHT
+        if screen is not None:
+            height = min(height, int(screen.availableGeometry().height() * 0.9))
+        self.resize(self.minimumWidth(), max(MIN_HEIGHT, height))
 
     def _setup_ui(self) -> None:
         outer = QVBoxLayout(self)
@@ -97,11 +118,7 @@ class SettingsDialog(QDialog):
             self._llm_button_group.addButton(radio, index)
             llm_layout.addWidget(radio)
 
-        llm_note = QLabel(
-            "Lite opens ChatGPT in your browser with a pre-filled prompt — no API key "
-            "needed. Built-in providers send track list text and video title to the "
-            "selected API using credentials stored locally."
-        )
+        llm_note = QLabel(AI_PROVIDERS_NOTE)
         llm_note.setWordWrap(True)
         llm_note.setStyleSheet("color: gray; font-size: 11px;")
         llm_layout.addWidget(llm_note)
@@ -191,6 +208,14 @@ class SettingsDialog(QDialog):
         auto_find_note.setStyleSheet("color: gray; font-size: 11px;")
         llm_layout.addWidget(auto_find_note)
 
+        self._log_requests_checkbox = QCheckBox(LOG_AI_REQUESTS_LABEL)
+        llm_layout.addWidget(self._log_requests_checkbox)
+        log_requests_note = QLabel(log_ai_requests_note(self._settings))
+        log_requests_note.setWordWrap(True)
+        log_requests_note.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        log_requests_note.setStyleSheet("color: gray; font-size: 11px;")
+        llm_layout.addWidget(log_requests_note)
+
         layout.addWidget(llm_group)
 
         scroll.setWidget(content)
@@ -268,6 +293,7 @@ class SettingsDialog(QDialog):
         self._compatible_model.setText(self._settings.compatible_model)
 
         self._auto_find_checkbox.setChecked(self._settings.auto_find_tracklist)
+        self._log_requests_checkbox.setChecked(self._settings.log_ai_requests)
 
         provider = self._settings.llm_provider
         radio_map = {
@@ -300,6 +326,7 @@ class SettingsDialog(QDialog):
 
         self._settings.llm_provider = self._selected_llm_provider()
         self._settings.auto_find_tracklist = self._auto_find_checkbox.isChecked()
+        self._settings.log_ai_requests = self._log_requests_checkbox.isChecked()
 
         self._settings.sync()
         self.accept()

@@ -21,29 +21,41 @@ Item {
     Rectangle {
         id: card
         anchors.centerIn: parent
-        width: 520
-        readonly property real paddedContentHeight: content.implicitHeight + 48
-        readonly property real maxHeight: parent.height - 48
-        height: Math.min(maxHeight, paddedContentHeight)
+        // Fit any window: the title and Done stay fixed, the settings scroll.
+        width: Math.min(520, parent.width - 32)
+        readonly property real chromeHeight:
+            24 + title.implicitHeight + 16 + 16 + footer.height + 24
+        height: Math.min(parent.height - 48, chromeHeight + content.implicitHeight)
         color: root.colors.card
         radius: 14
         border.color: root.colors.border; border.width: 1
 
         MouseArea { anchors.fill: parent }
 
+        Text {
+            id: title
+            anchors { top: parent.top; left: parent.left; topMargin: 24; leftMargin: 24 }
+            text: "Settings"; color: root.colors.text; font { pixelSize: 18; weight: Font.Bold }
+        }
+
         ScrollView {
             id: contentScroll
-            anchors { fill: parent; margins: 24 }
+            objectName: "settingsScroll"
+            anchors {
+                top: title.bottom; topMargin: 16
+                bottom: footer.top; bottomMargin: 16
+                left: parent.left; leftMargin: 24
+                right: parent.right; rightMargin: 12
+            }
+            rightPadding: 12
             clip: true
-            ScrollBar.vertical.policy: card.paddedContentHeight > card.height ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
+            ScrollBar.vertical.policy: ScrollBar.AsNeeded
             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
             ColumnLayout {
                 id: content
-                width: card.width - 48
+                width: contentScroll.availableWidth
                 spacing: 16
-
-            Text { text: "Settings"; color: root.colors.text; font { pixelSize: 18; weight: Font.Bold } }
 
             /* ── use external yt-dlp toggle ── */
             RowLayout {
@@ -187,7 +199,7 @@ Item {
                 }
 
                 Text {
-                    text: "Lite opens ChatGPT in your browser — no API key. Built-in providers send track list text and video title to the selected API using credentials stored locally."
+                    text: backend.findTexts.aiProvidersNote
                     color: root.colors.textMuted
                     font.pixelSize: 11
                     wrapMode: Text.Wrap
@@ -473,38 +485,79 @@ Item {
                         }
                     }
                 }
-            }
 
-            Item { Layout.preferredHeight: 4 }
+                /* ── AI request logging (debugging) ── */
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 10
 
-            Rectangle {
-                Layout.alignment: Qt.AlignRight
-                width: 84; height: 34; radius: root.colors.radiusSm
-                color: closeMA.containsMouse ? root.colors.accentHover : root.colors.accent
-                Behavior on color { ColorAnimation { duration: 120 } }
-                Text { anchors.centerIn: parent; text: "Done"; color: "white"; font { pixelSize: 13; weight: Font.DemiBold } }
-                MouseArea {
-                    id: closeMA
-                    objectName: "settingsDoneButton"
-                    anchors.fill: parent
-                    hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                    onClicked: {
-                        ytdlpPathField.editingFinished()
-                        ffmpegPathField.editingFinished()
-                        openaiKeyField.editingFinished()
-                        openaiModelField.editingFinished()
-                        anthropicKeyField.editingFinished()
-                        anthropicModelField.editingFinished()
-                        vertexKeyField.editingFinished()
-                        vertexModelField.editingFinished()
-                        compatibleUrlField.editingFinished()
-                        compatibleTokenField.editingFinished()
-                        compatibleModelField.editingFinished()
-                        root.open = false
+                    Rectangle {
+                        width: 40; height: 22; radius: 11
+                        Layout.alignment: Qt.AlignTop
+                        color: backend.logAiRequests ? root.colors.accent : root.colors.inputBg
+                        border.color: root.colors.border; border.width: 1
+                        Behavior on color { ColorAnimation { duration: 150 } }
+
+                        Rectangle {
+                            width: 18; height: 18; radius: 9
+                            color: "white"
+                            anchors.verticalCenter: parent.verticalCenter
+                            x: backend.logAiRequests ? parent.width - width - 2 : 2
+                            Behavior on x { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
+                        }
+
+                        MouseArea {
+                            objectName: "logRequestsToggle"
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: backend.setLogAiRequests(!backend.logAiRequests)
+                        }
+                    }
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 2
+                        Text { text: backend.findTexts.logRequestsLabel; color: root.colors.text; font.pixelSize: 13 }
+                        Text {
+                            objectName: "logRequestsNote"
+                            text: backend.findTexts.logRequestsNote
+                            color: root.colors.textMuted; font.pixelSize: 11
+                            wrapMode: Text.Wrap
+                            Layout.fillWidth: true
+                        }
                     }
                 }
             }
+
+            }
         }
+
+        Rectangle {
+            id: footer
+            anchors { right: parent.right; bottom: parent.bottom; margins: 24 }
+            width: 84; height: 34; radius: root.colors.radiusSm
+            color: closeMA.containsMouse ? root.colors.accentHover : root.colors.accent
+            Behavior on color { ColorAnimation { duration: 120 } }
+            Text { anchors.centerIn: parent; text: "Done"; color: "white"; font { pixelSize: 13; weight: Font.DemiBold } }
+            MouseArea {
+                id: closeMA
+                objectName: "settingsDoneButton"
+                anchors.fill: parent
+                hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                    ytdlpPathField.editingFinished()
+                    ffmpegPathField.editingFinished()
+                    openaiKeyField.editingFinished()
+                    openaiModelField.editingFinished()
+                    anthropicKeyField.editingFinished()
+                    anthropicModelField.editingFinished()
+                    vertexKeyField.editingFinished()
+                    vertexModelField.editingFinished()
+                    compatibleUrlField.editingFinished()
+                    compatibleTokenField.editingFinished()
+                    compatibleModelField.editingFinished()
+                    root.open = false
+                }
+            }
         }
     }
 

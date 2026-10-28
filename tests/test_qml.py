@@ -526,10 +526,12 @@ class TestTrackFinder:
         assert prop(window, "templateSetByAi", "visible") is True
         assert finder_rows(window) == (False, True, False)
         assert prop(window, "aiButtonText") == "✨ Detect format"
-        assert log_messages(backend)[-3:] == [
+        assert log_messages(backend)[-5:] == [
             "Video info: no description, 0 chapters, 0 comments",
             "AI: found 2 timestamped tracks in comment #3",
             'AI: format set to "%songname% - %mm%:%ss%"',
+            'AI: artist set to "AI Band"',
+            'AI: album set to "AI Album"',
         ]
 
     def test_auto_find_keeps_typed_artist_and_album(self, qml_harness, fake_find):
@@ -838,6 +840,29 @@ class TestPanelsAndDialogs:
             assert prop(window2, "anthropicKeyField") == "sk-ant-123"
             assert prop(window2, "anthropicModelField") == "claude-custom"
             assert warnings == []
+
+    def test_log_requests_toggle_persists(self, qml_harness):
+        window, backend, settings = qml_harness
+        open_settings(window)
+        assert settings.log_ai_requests is False
+        click_item(window, "logRequestsToggle")
+        click_item(window, "settingsDoneButton")
+        assert settings.log_ai_requests is True
+        assert backend.logAiRequests is True
+
+    def test_settings_done_visible_at_minimum_window_size(self, qml_harness):
+        window, backend, _settings = qml_harness
+        backend.setLlmProvider("openai_compatible")  # Tallest provider form.
+        window.setWidth(window.minimumWidth())
+        window.setHeight(window.minimumHeight())
+        QApplication.instance().processEvents()
+        open_settings(window)
+        QApplication.instance().processEvents()
+        # No scrolling first: Done must already be inside the window.
+        done = find_item(window, "settingsDoneButton")
+        top_left = done.mapToItem(window.contentItem(), 0, 0)
+        assert top_left.y() >= 0
+        assert top_left.y() + done.height() <= window.height()
 
     def test_settings_field_saves_on_enter_without_done(self, qml_harness):
         window, _backend, settings = qml_harness

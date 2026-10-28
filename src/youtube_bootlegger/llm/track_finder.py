@@ -20,6 +20,7 @@ from .client import complete_structured
 from .config import endpoint_from_settings
 from .http import LlmError, PostJson, post_json
 from .prompt import FIND_SYSTEM_PROMPT, build_find_prompt
+from .request_log import with_request_log
 
 SCHEMA_NAME = "tracklist_discovery"
 
@@ -208,7 +209,7 @@ def find_tracklist(
             user=build_find_prompt(info.title, info.duration, sources),
             output=TracklistDiscovery,
             schema_name=SCHEMA_NAME,
-            http_post=http_post,
+            http_post=with_request_log(http_post, settings),
         )
     except LlmError as exc:
         raise TracklistFindError(str(exc)) from exc

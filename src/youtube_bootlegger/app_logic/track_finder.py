@@ -8,7 +8,7 @@ state (cache, request tokens, AI-filled snapshot for Undo).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 
 from ..core.settings import AppSettings, LlmProvider
@@ -185,6 +185,27 @@ def video_sources_log_line(info: VideoInfo, settings: AppSettings) -> LogLine:
     return LogLine("Video info: " + ", ".join(parts))
 
 
+def _fill_blank_metadata(
+    current: FormValues, result: TracklistFindResult,
+) -> tuple[FormValues, tuple[LogLine, ...]]:
+    """Fill a blank artist/album from the AI result, never overwriting the user's."""
+    artist = current.artist if current.artist.strip() else result.artist_name
+    album = current.album if current.album.strip() else result.album_name
+    log = []
+    if artist != current.artist:
+        log.append(LogLine(f'AI: artist set to "{artist}"'))
+    if album != current.album:
+        log.append(LogLine(f'AI: album set to "{album}"'))
+    return replace(current, artist=artist, album=album), tuple(log)
+
+
+def _metadata_only(
+    values: FormValues, current: FormValues, log: tuple[LogLine, ...],
+) -> FindApplication:
+    """A result with no track list to apply: only blank artist/album may change."""
+    return FindApplication(values if values != current else None, "", log)
+
+
 def _count(n: int, noun: str) -> str:
     return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
 
@@ -262,18 +283,25 @@ class TrackFinderSession:
           track" singular), then
           'AI: format set to "<FIND_TEMPLATE>"'
         - UNTIMED: "AI: found song names without timestamps in <label>; add
-          timestamps to use it" (warn), values None, no banner
+          timestamps to use it" (warn), no banner
         - NOT_FOUND: "AI: no track list found in the description, chapters
-          or comments", values None, no banner
+          or comments", no banner
 
         If the box was filled meanwhile (current.tracklist not blank), FOUND
-        is not applied: values None, no banner, log "AI: found a track list,
-        but you'd already filled one in; left it unchanged" (warn).
+        is not applied: no banner, log "AI: found a track list, but you'd
+        already filled one in; left it unchanged" (warn).
+
+        In every outcome, a blank artist/album in ``current`` is filled from
+        the result, logged as 'AI: artist set to "<name>"' / 'AI: album set
+        to "<name>"' (after the lines above). Without a FOUND fill, values is
+        ``current`` with only those fields changed, or None if neither changed.
         """
         if not self.is_current(token):
             return None
         self._token = None
         self._cache[video_id] = result
+
+        with_metadata, metadata_log = _fill_blank_metadata(current, result)
 
         if result.outcome == FindOutcome.UNTIMED:
             line = LogLine(
@@ -281,22 +309,19 @@ class TrackFinderSession:
                 "add timestamps to use it",
                 "warn",
             )
-            return FindApplication(None, "", (line,))
+            return _metadata_only(with_metadata, current, (line, *metadata_log))
         if result.outcome != FindOutcome.FOUND:
             line = LogLine("AI: no track list found in the description, chapters or comments")
-            return FindApplication(None, "", (line,))
+            return _metadata_only(with_metadata, current, (line, *metadata_log))
         if current.tracklist.strip():
             line = LogLine(
                 "AI: found a track list, but you'd already filled one in; left it unchanged",
                 "warn",
             )
-            return FindApplication(None, "", (line,))
+            return _metadata_only(with_metadata, current, (line, *metadata_log))
 
-        values = FormValues(
-            tracklist=render_tracklist(result.tracks),
-            template=FIND_TEMPLATE,
-            artist=current.artist if current.artist.strip() else result.artist_name,
-            album=current.album if current.album.strip() else result.album_name,
+        values = replace(
+            with_metadata, tracklist=render_tracklist(result.tracks), template=FIND_TEMPLATE,
         )
         self._before_fill = current
         self._filled_text = values.tracklist
@@ -310,6 +335,7 @@ class TrackFinderSession:
                 f"in {result.source.label}"
             ),
             LogLine(f'AI: format set to "{FIND_TEMPLATE}"'),
+            *metadata_log,
         )
         return FindApplication(values, self._banner, log)
 

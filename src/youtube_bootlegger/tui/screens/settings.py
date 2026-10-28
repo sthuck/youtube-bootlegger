@@ -8,6 +8,7 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, Select, Static, Switch
 
+from ...app_logic import AI_PROVIDERS_NOTE, LOG_AI_REQUESTS_LABEL, log_ai_requests_note
 from ...app_logic.track_finder import AUTO_FIND_SETTING_LABEL, AUTO_FIND_SETTING_NOTE
 from ...core.settings import AppSettings, LlmProvider
 from ...llm import (
@@ -25,13 +26,6 @@ PROVIDER_OPTIONS = (
     ("Google Gemini (API key)", LlmProvider.VERTEX),
     ("OpenAI compatible", LlmProvider.OPENAI_COMPATIBLE),
 )
-
-AI_NOTE = (
-    "Lite opens ChatGPT in your browser — no API key. Built-in providers send "
-    "track list text and video title to the selected API using credentials "
-    "stored locally."
-)
-
 
 @dataclass(frozen=True)
 class SettingField:
@@ -109,7 +103,7 @@ class SettingsScreen(ModalScreen[bool]):
                 yield Static("", id="ffmpeg-warning", classes="field-error")
 
                 yield Static("AI ASSISTANT", classes="section-title")
-                yield Static(AI_NOTE, classes="muted")
+                yield Static(AI_PROVIDERS_NOTE, classes="muted")
                 yield Select(
                     PROVIDER_OPTIONS,
                     value=s.llm_provider,
@@ -124,6 +118,10 @@ class SettingsScreen(ModalScreen[bool]):
                     yield Switch(s.auto_find_tracklist, id="setting-auto-find-tracklist")
                     yield Label(AUTO_FIND_SETTING_LABEL)
                 yield Static(AUTO_FIND_SETTING_NOTE, classes="muted")
+                with Horizontal(classes="switch-row"):
+                    yield Switch(s.log_ai_requests, id="setting-log-ai-requests")
+                    yield Label(LOG_AI_REQUESTS_LABEL)
+                yield Static(log_ai_requests_note(s), classes="muted")
             with Horizontal(classes="dialog-buttons"):
                 yield Button("Cancel", id="settings-cancel")
                 yield Button("Save", variant="primary", id="settings-save")
@@ -152,6 +150,7 @@ class SettingsScreen(ModalScreen[bool]):
         s.use_external_ytdlp = self.query_one("#setting-use-external-ytdlp", Switch).value
         s.llm_provider = self.query_one("#setting-llm-provider", Select).value
         s.auto_find_tracklist = self.query_one("#setting-auto-find-tracklist", Switch).value
+        s.log_ai_requests = self.query_one("#setting-log-ai-requests", Switch).value
         all_fields = TOOL_FIELDS + tuple(f for fs in PROVIDER_FIELDS.values() for f in fs)
         for field in all_fields:
             setattr(s, field.attr, self.query_one(f"#{_input_id(field)}", Input).value)
