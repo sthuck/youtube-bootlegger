@@ -19,6 +19,12 @@ from ..core.tools import ToolSource, ToolStatus
 YTDLP_PATH_PLACEHOLDER = "Leave empty to use the downloaded yt-dlp"
 FFMPEG_PATH_PLACEHOLDER = "Leave empty to use FFmpeg from PATH, or the downloaded one"
 TOOLS_SECTION_TITLE = "Runtime tools"
+EXTRA_ARGS_PLACEHOLDER = "e.g. --proxy socks5://127.0.0.1:9050 --limit-rate 2M"
+EXTRA_ARGS_NOTE = (
+    "Added to every yt-dlp run. Options that change where files go, their format "
+    "or what yt-dlp prints can't be used. yt-dlp config files are read only by a "
+    "yt-dlp whose path you set."
+)
 
 
 class ToolsPhase(StrEnum):

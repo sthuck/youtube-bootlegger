@@ -890,6 +890,26 @@ class TestPanelsAndDialogs:
         assert top_left.y() >= 0
         assert top_left.y() + done.height() <= window.height()
 
+    def test_extra_ytdlp_options_that_break_the_app_are_not_saved(self, qml_harness):
+        window, backend, settings = qml_harness
+        panel = open_settings(window)
+        settings.ytdlp_extra_args = "--limit-rate 1M"
+
+        type_text(window, "ytdlpExtraArgsField", "--print title")
+        click_item(window, "settingsDoneButton")
+        assert settings.ytdlp_extra_args == "--limit-rate 1M"
+        assert prop(window, "ytdlpExtraArgsError", "text") == (
+            "Extra yt-dlp options: '--print' can't be used: the app sets this itself."
+        )
+        assert prop(window, "ytdlpExtraArgsError", "visible") is True
+        assert panel.property("open") is True  # stays open to show why
+
+        type_text(window, "ytdlpExtraArgsField", "--proxy socks5://h:1")
+        click_item(window, "settingsDoneButton")
+        assert settings.ytdlp_extra_args == "--proxy socks5://h:1"
+        assert backend.ytdlpExtraArgsError == ""
+        assert panel.property("open") is False
+
     def test_settings_field_saves_on_enter_without_done(self, qml_harness):
         window, _backend, settings = qml_harness
         open_settings(window)

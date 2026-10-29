@@ -22,7 +22,12 @@ from PySide6.QtWidgets import (
 )
 
 from ...app_logic import AI_PROVIDERS_NOTE, LOG_AI_REQUESTS_LABEL, log_ai_requests_note
-from ...app_logic.runtime_tools import FFMPEG_PATH_PLACEHOLDER, YTDLP_PATH_PLACEHOLDER
+from ...app_logic.runtime_tools import (
+    EXTRA_ARGS_NOTE,
+    EXTRA_ARGS_PLACEHOLDER,
+    FFMPEG_PATH_PLACEHOLDER,
+    YTDLP_PATH_PLACEHOLDER,
+)
 from ...app_logic.track_finder import AUTO_FIND_SETTING_LABEL, AUTO_FIND_SETTING_NOTE
 from ...llm import (
     DEFAULT_ANTHROPIC_MODEL,
@@ -38,7 +43,9 @@ from ...core.settings import (
     LlmProvider,
     get_settings,
 )
+from ...core.exceptions import ValidationError
 from ...core.tools import ToolStatus
+from ...core.ytdlp_extra_args import EXTRA_ARGS_LABEL, parse_extra_args
 from .tools_settings_group import ToolsSettingsGroup
 
 
@@ -124,6 +131,20 @@ class SettingsDialog(QDialog):
             placeholder=FFMPEG_PATH_PLACEHOLDER,
         )
         tools_form.addRow("ffmpeg path:", ffmpeg_row)
+
+        self._extra_args_input = QLineEdit()
+        self._extra_args_input.setPlaceholderText(EXTRA_ARGS_PLACEHOLDER)
+        self._extra_args_input.textChanged.connect(lambda _text: self._extra_args_error.hide())
+        tools_form.addRow(f"{EXTRA_ARGS_LABEL}:", self._extra_args_input)
+        self._extra_args_error = QLabel()
+        self._extra_args_error.setWordWrap(True)
+        self._extra_args_error.setStyleSheet("color: red; font-size: 11px;")
+        self._extra_args_error.hide()
+        tools_form.addRow(self._extra_args_error)
+        extra_args_note = QLabel(EXTRA_ARGS_NOTE)
+        extra_args_note.setWordWrap(True)
+        extra_args_note.setStyleSheet("color: gray; font-size: 11px;")
+        tools_form.addRow(extra_args_note)
 
         cookies_label_widget = QWidget()
         cookies_label_layout = QHBoxLayout(cookies_label_widget)
@@ -340,6 +361,7 @@ class SettingsDialog(QDialog):
         self._use_external_checkbox.setChecked(self._loaded_use_external)
         self._ytdlp_path_input.setText(self._settings.ytdlp_path)
         self._ffmpeg_path_input.setText(self._settings.ffmpeg_path)
+        self._extra_args_input.setText(self._settings.ytdlp_extra_args)
         self._ytdlp_path_input.setEnabled(self._settings.use_external_ytdlp)
         browser_index = self._cookies_browser_combo.findData(self._settings.cookies_from_browser)
         self._cookies_browser_combo.setCurrentIndex(max(0, browser_index))
@@ -372,10 +394,19 @@ class SettingsDialog(QDialog):
 
     def _on_save(self) -> None:
         """Persist the form values and close the dialog."""
+        extra_args = self._extra_args_input.text()
+        try:
+            parse_extra_args(extra_args)
+        except ValidationError as e:
+            self._extra_args_error.setText(str(e))
+            self._extra_args_error.show()
+            self._extra_args_input.setFocus()
+            return
         if self._use_external_checkbox.isChecked() != self._loaded_use_external:
             self._settings.use_external_ytdlp = self._use_external_checkbox.isChecked()
         self._settings.ytdlp_path = self._ytdlp_path_input.text()
         self._settings.ffmpeg_path = self._ffmpeg_path_input.text()
+        self._settings.ytdlp_extra_args = extra_args
         selected_browser = self._cookies_browser_combo.currentData()
         self._settings.cookies_from_browser = (
             selected_browser if selected_browser is not None else CookieBrowser.NONE

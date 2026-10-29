@@ -8,6 +8,7 @@ from typing import Any, Protocol
 from PySide6.QtCore import QSettings
 
 from .tools import ToolStatus, ToolStore, default_tools_dir, tool_status
+from .ytdlp_extra_args import parse_extra_args
 
 _ORG_NAME = "YouTubeBootlegger"
 _APP_NAME = "YouTubeBootlegger"
@@ -15,6 +16,7 @@ _APP_NAME = "YouTubeBootlegger"
 _USE_EXTERNAL_KEY = "ytdlp/use_external"
 _YTDLP_PATH_KEY = "ytdlp/path"
 _COOKIES_FROM_BROWSER_KEY = "ytdlp/cookies_from_browser"
+_YTDLP_EXTRA_ARGS_KEY = "ytdlp/extra_args"
 _FFMPEG_PATH_KEY = "ffmpeg/path"
 
 _LLM_PROVIDER_KEY = "llm/provider"
@@ -209,6 +211,34 @@ class AppSettings:
         if browser != CookieBrowser.NONE:
             return ["--cookies-from-browser", browser.value]
         return []
+
+    @property
+    def ytdlp_extra_args(self) -> str:
+        """Extra yt-dlp options typed in Settings (see ytdlp_extra_args.py)."""
+        return str(self._backend.value(_YTDLP_EXTRA_ARGS_KEY, "") or "")
+
+    @ytdlp_extra_args.setter
+    def ytdlp_extra_args(self, text: str) -> None:
+        """Raises ValidationError, storing nothing, when yt-dlp would reject it."""
+        text = (text or "").strip()
+        parse_extra_args(text)
+        self._backend.setValue(_YTDLP_EXTRA_ARGS_KEY, text)
+
+    def ytdlp_extra_options(self) -> dict[str, Any]:
+        """The extra options as Python API options. Raises ValidationError."""
+        return parse_extra_args(self.ytdlp_extra_args)[1]
+
+    def ytdlp_config_cli_args(self) -> list[str]:
+        """Arguments that go right after the yt-dlp executable. Raises ValidationError.
+
+        yt-dlp reads config files (system-wide, ~/.config/yt-dlp/config, next
+        to the executable, the current folder) that can change where files go
+        or what it prints. The app's own yt-dlp ignores them; a yt-dlp path set
+        in Settings reads them, since whoever brings their own yt-dlp manages
+        its config too. Extra options from Settings apply either way.
+        """
+        ignore = [] if self.ytdlp_path else ["--ignore-config"]
+        return ignore + parse_extra_args(self.ytdlp_extra_args)[0]
 
     @property
     def ffmpeg_path(self) -> str:

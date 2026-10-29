@@ -90,6 +90,7 @@ class AudioDownloader:
         self._log(f"yt-dlp library version: {yt_dlp.version.__version__}")
 
         ydl_opts = {
+            **self._settings.ytdlp_extra_options(),
             "format": "bestaudio/best",
             "postprocessors": [
                 {
@@ -189,7 +190,7 @@ class AudioDownloader:
 
         cmd = [
             command,
-            "--ignore-config",
+            *self._settings.ytdlp_config_cli_args(),
             "-f", "bestaudio/best",
             "-x",
             "--audio-format", "mp3",

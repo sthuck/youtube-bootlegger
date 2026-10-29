@@ -48,6 +48,7 @@ from ..core.settings import (
     LlmProvider,
     get_settings,
 )
+from ..core.exceptions import ValidationError
 from ..core.tool_installer import HttpGet, urlopen_get
 from ..core.video_info import VideoInfo
 from ..models import DownloadJob
@@ -98,6 +99,8 @@ class AppBackend(QObject):
     defaultTemplateChanged = Signal()
     useExternalYtdlpChanged = Signal()
     ytdlpPathChanged = Signal()
+    ytdlpExtraArgsChanged = Signal()
+    ytdlpExtraArgsErrorChanged = Signal()
     cookiesFromBrowserChanged = Signal()
     ffmpegPathChanged = Signal()
     llmProviderChanged = Signal()
@@ -151,6 +154,10 @@ class AppBackend(QObject):
     defaultTemplate = Property(str, _getter("_default_template"), notify=defaultTemplateChanged)
     useExternalYtdlp = Property(bool, _getter("_use_external_ytdlp"), notify=useExternalYtdlpChanged)
     ytdlpPath = Property(str, _getter("_ytdlp_path"), notify=ytdlpPathChanged)
+    ytdlpExtraArgs = Property(str, _getter("_ytdlp_extra_args"), notify=ytdlpExtraArgsChanged)
+    ytdlpExtraArgsError = Property(
+        str, _getter("_ytdlp_extra_args_error"), notify=ytdlpExtraArgsErrorChanged
+    )
     cookiesFromBrowser = Property(
         str, _getter("_cookies_from_browser"), notify=cookiesFromBrowserChanged
     )
@@ -251,6 +258,8 @@ class AppBackend(QObject):
         self._app_settings = settings if settings is not None else get_settings()
         self._use_external_ytdlp = self._app_settings.use_external_ytdlp
         self._ytdlp_path = self._app_settings.ytdlp_path
+        self._ytdlp_extra_args = self._app_settings.ytdlp_extra_args
+        self._ytdlp_extra_args_error = ""
         self._cookies_from_browser = self._app_settings.cookies_from_browser.value
         self._cookies_browser_tooltip = COOKIE_BROWSER_TOOLTIP
         self._cookie_browser_options = [
@@ -444,6 +453,22 @@ class AppBackend(QObject):
         self._emit("_ytdlp_path", self._app_settings.ytdlp_path, self.ytdlpPathChanged)
         self._maybe_refetch_video_info(before)
         self._tools.checkAutoDownload()
+
+    @Slot(str)
+    def setYtdlpExtraArgs(self, text):
+        """Store the options if yt-dlp accepts them; otherwise show why, keeping the old ones."""
+        before = fetch_config(self._app_settings)
+        try:
+            self._app_settings.ytdlp_extra_args = text
+        except ValidationError as e:
+            self._emit("_ytdlp_extra_args_error", str(e), self.ytdlpExtraArgsErrorChanged)
+            return
+        self._app_settings.sync()
+        self._emit("_ytdlp_extra_args_error", "", self.ytdlpExtraArgsErrorChanged)
+        self._emit(
+            "_ytdlp_extra_args", self._app_settings.ytdlp_extra_args, self.ytdlpExtraArgsChanged
+        )
+        self._maybe_refetch_video_info(before)
 
     @Slot(str)
     def setCookiesFromBrowser(self, browser):

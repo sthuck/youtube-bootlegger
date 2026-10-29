@@ -17,6 +17,8 @@ from .presentation import (
     summarize_video,
 )
 from .runtime_tools import (
+    EXTRA_ARGS_NOTE,
+    EXTRA_ARGS_PLACEHOLDER,
     FFMPEG_PATH_PLACEHOLDER,
     TOOLS_SECTION_TITLE,
     YTDLP_PATH_PLACEHOLDER,
@@ -46,6 +48,8 @@ from .track_finder import (
 )
 
 __all__ = [
+    "EXTRA_ARGS_NOTE",
+    "EXTRA_ARGS_PLACEHOLDER",
     "FFMPEG_PATH_PLACEHOLDER",
     "TOOLS_SECTION_TITLE",
     "YTDLP_PATH_PLACEHOLDER",

@@ -62,8 +62,27 @@ the default; an explicit choice in Settings is kept.
 Every yt-dlp run gets `--ffmpeg-location <resolved FFmpeg>` and, when Deno was
 downloaded, `--js-runtimes deno:<path>` (or the equivalent library options).
 `--js-runtimes` is left out for a yt-dlp path set in Settings, because yt-dlp
-versions before 2025.11 reject it; such a yt-dlp finds Deno on PATH by itself.
-`--ignore-config` keeps a global yt-dlp config from changing the app's behaviour.
+versions before 2025.11 reject it; such a yt-dlp finds only a Deno on PATH.
+Whoever brings their own yt-dlp manages its JS runtime.
+
+## yt-dlp config files and extra options
+
+yt-dlp reads config files: system-wide, `~/.config/yt-dlp/config`, next to the
+executable, and `yt-dlp.conf` in the current folder. Options there such as `-o`,
+`--download-archive` or `--quiet` would break how the app finds the file and
+reads progress. The downloaded yt-dlp therefore runs with `--ignore-config`. A
+yt-dlp path set in Settings reads its config files, for the same reason as above.
+Library mode never reads them.
+
+Settings → Extra yt-dlp options holds options for every run, such as
+`--proxy`, `--limit-rate`, `--cookies` or `--extractor-args`. The text is split
+like a shell command line, but backslashes are kept as typed so Windows paths
+work; quote values that contain spaces. `core/ytdlp_extra_args.py` checks it with
+yt-dlp's own parser, which also turns it into YoutubeDL options for library mode.
+Saving is refused, with the reason, for unknown options, video URLs, and options
+that change where files go, their format, post-processing or what yt-dlp prints.
+FFmpeg and browser cookies have their own settings. In external mode the options
+go right after the executable, so the app's own arguments, which follow, win.
 
 ## Checks
 

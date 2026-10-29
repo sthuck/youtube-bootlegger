@@ -62,8 +62,18 @@ def _max_comments(limit: int) -> list[str]:
     return [str(limit), str(limit), "0", "0"]
 
 
+def _comment_extractor_args(settings: AppSettings, comment_limit: int) -> dict[str, list[str]]:
+    """YouTube extractor args for comments, keeping any from the extra options.
+
+    yt-dlp replaces, not merges, a second set of args for the same site.
+    """
+    extra = settings.ytdlp_extra_options().get("extractor_args", {}).get("youtube", {})
+    return {**extra, "comment_sort": ["top"], "max_comments": _max_comments(comment_limit)}
+
+
 def _fetch_library(url: str, comment_limit: int, settings: AppSettings):
     options = {
+        **settings.ytdlp_extra_options(),
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
@@ -77,10 +87,10 @@ def _fetch_library(url: str, comment_limit: int, settings: AppSettings):
             "socket_timeout": COMMENTS_SOCKET_TIMEOUT_SECONDS,
             "retries": 1,
             "extractor_retries": 1,
-            "extractor_args": {"youtube": {
-                "comment_sort": ["top"],
-                "max_comments": _max_comments(comment_limit),
-            }},
+            "extractor_args": {
+                **options.get("extractor_args", {}),
+                "youtube": _comment_extractor_args(settings, comment_limit),
+            },
         })
 
     try:
@@ -110,7 +120,7 @@ def _run_external(url: str, settings: AppSettings, comment_limit: int):
     command = settings.resolved_ytdlp_command()
     cmd = [
         command,
-        "--ignore-config",
+        *settings.ytdlp_config_cli_args(),
         "--dump-single-json",
         "--no-warnings",
         "--no-playlist",
@@ -126,7 +136,10 @@ def _run_external(url: str, settings: AppSettings, comment_limit: int):
             "--retries", "1",
             "--extractor-retries", "1",
             "--extractor-args",
-            "youtube:comment_sort=top;max_comments=" + ",".join(_max_comments(comment_limit)),
+            "youtube:" + ";".join(
+                f"{key}={','.join(values)}"
+                for key, values in _comment_extractor_args(settings, comment_limit).items()
+            ),
         ]
         timeout = COMMENTS_TIMEOUT_SECONDS
     cmd += ["--", url]

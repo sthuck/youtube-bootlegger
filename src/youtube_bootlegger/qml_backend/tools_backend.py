@@ -8,6 +8,8 @@ session's state as Qt properties.
 from PySide6.QtCore import Property, QObject, QThreadPool, Signal, Slot
 
 from ..app_logic import (
+    EXTRA_ARGS_NOTE,
+    EXTRA_ARGS_PLACEHOLDER,
     FFMPEG_PATH_PLACEHOLDER,
     TOOLS_SECTION_TITLE,
     YTDLP_PATH_PLACEHOLDER,
@@ -16,12 +18,16 @@ from ..app_logic import (
 )
 from ..core.settings import AppSettings
 from ..core.tool_installer import HttpGet, urlopen_get
+from ..core.ytdlp_extra_args import EXTRA_ARGS_LABEL
 from ..workers.tools_download_runner import ToolsDownloadRunner
 
 TOOLS_TEXTS = {
     "sectionTitle": TOOLS_SECTION_TITLE,
     "ytdlpPlaceholder": YTDLP_PATH_PLACEHOLDER,
     "ffmpegPlaceholder": FFMPEG_PATH_PLACEHOLDER,
+    "extraArgsLabel": EXTRA_ARGS_LABEL,
+    "extraArgsPlaceholder": EXTRA_ARGS_PLACEHOLDER,
+    "extraArgsNote": EXTRA_ARGS_NOTE,
     "downloadMissing": "Download missing",
     "verify": "Verify",
     "openFolder": "Open folder",

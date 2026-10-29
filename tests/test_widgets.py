@@ -334,6 +334,25 @@ def test_settings_dialog_saves_auto_find(widgets_app, settings):
     dialog.deleteLater()
 
 
+def test_settings_dialog_rejects_extra_ytdlp_options_that_break_the_app(widgets_app, settings):
+    dialog = SettingsDialog(settings=settings)
+    dialog.show()
+    dialog._extra_args_input.setText("--limit-rate 2M -o out.mp3")
+    dialog._on_save()
+    assert dialog.isVisible() and dialog.result() == 0
+    assert dialog._extra_args_error.text() == (
+        "Extra yt-dlp options: '-o' can't be used: the app sets this itself."
+    )
+    assert settings.ytdlp_extra_args == ""
+
+    dialog._extra_args_input.setText("--limit-rate 2M")
+    assert dialog._extra_args_error.isHidden()
+    dialog._on_save()
+    assert settings.ytdlp_extra_args == "--limit-rate 2M"
+    assert SettingsDialog(settings=settings)._extra_args_input.text() == "--limit-rate 2M"
+    dialog.deleteLater()
+
+
 def test_settings_dialog_fits_screen_with_buttons_visible(widgets_app, settings):
     dialog = SettingsDialog(settings=settings)
     dialog.show()

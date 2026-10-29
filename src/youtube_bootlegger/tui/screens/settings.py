@@ -15,6 +15,8 @@ from textual.widgets import Button, Input, Label, Select, Static, Switch
 
 from ...app_logic import (
     AI_PROVIDERS_NOTE,
+    EXTRA_ARGS_NOTE,
+    EXTRA_ARGS_PLACEHOLDER,
     FFMPEG_PATH_PLACEHOLDER,
     LOG_AI_REQUESTS_LABEL,
     TOOLS_SECTION_TITLE,
@@ -35,7 +37,9 @@ from ...llm import (
     DEFAULT_OPENAI_MODEL,
     DEFAULT_VERTEX_MODEL,
 )
+from ...core.exceptions import ValidationError
 from ...core.tools import ToolSource, tool_status
+from ...core.ytdlp_extra_args import EXTRA_ARGS_LABEL, parse_extra_args
 from ...utils import is_ffmpeg_available
 
 if TYPE_CHECKING:
@@ -83,6 +87,7 @@ TOOL_FIELDS = (
     SettingField("ytdlp_path", "yt-dlp path", YTDLP_PATH_PLACEHOLDER),
     SettingField("ffmpeg_path", "ffmpeg path", FFMPEG_PATH_PLACEHOLDER),
 )
+EXTRA_ARGS_FIELD = SettingField("ytdlp_extra_args", EXTRA_ARGS_LABEL, EXTRA_ARGS_PLACEHOLDER)
 
 NO_TOOLS_FOLDER_NOTE = "No folder for downloaded tools: downloads are turned off."
 
@@ -137,6 +142,9 @@ class SettingsScreen(ModalScreen[bool]):
                 for field in TOOL_FIELDS:
                     yield from _field_widgets(field, s)
                 yield Static("", id="ffmpeg-warning", classes="field-error")
+                yield from _field_widgets(EXTRA_ARGS_FIELD, s)
+                yield Static("", id="extra-args-error", classes="field-error")
+                yield Static(EXTRA_ARGS_NOTE, classes="muted")
                 with Horizontal(classes="label-row"):
                     yield Label("Browser cookies (age-restricted videos)", classes="field-label")
                     yield Static(" ⓘ", id="cookies-browser-info", classes="info-icon")
@@ -185,6 +193,8 @@ class SettingsScreen(ModalScreen[bool]):
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "setting-ffmpeg-path":
             self._refresh_ffmpeg_warning(event.value)
+        elif event.input.id == _input_id(EXTRA_ARGS_FIELD):
+            self.query_one("#extra-args-error", Static).update("")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         event.stop()
@@ -216,6 +226,13 @@ class SettingsScreen(ModalScreen[bool]):
 
     def action_save(self) -> None:
         s = self._settings
+        extra_args = self.query_one(f"#{_input_id(EXTRA_ARGS_FIELD)}", Input)
+        try:
+            parse_extra_args(extra_args.value)
+        except ValidationError as e:
+            self.query_one("#extra-args-error", Static).update(Text(str(e)))
+            extra_args.focus()
+            return
         use_external = self.query_one("#setting-use-external-ytdlp", Switch).value
         if use_external != self._loaded_use_external:
             s.use_external_ytdlp = use_external
@@ -223,7 +240,7 @@ class SettingsScreen(ModalScreen[bool]):
         s.llm_provider = self.query_one("#setting-llm-provider", Select).value
         s.auto_find_tracklist = self.query_one("#setting-auto-find-tracklist", Switch).value
         s.log_ai_requests = self.query_one("#setting-log-ai-requests", Switch).value
-        all_fields = TOOL_FIELDS + tuple(f for fs in PROVIDER_FIELDS.values() for f in fs)
+        all_fields = TOOL_FIELDS + (EXTRA_ARGS_FIELD,) + tuple(f for fs in PROVIDER_FIELDS.values() for f in fs)
         for field in all_fields:
             setattr(s, field.attr, self.query_one(f"#{_input_id(field)}", Input).value)
         s.sync()
