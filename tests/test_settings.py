@@ -5,7 +5,14 @@ from src.youtube_bootlegger.llm import (
     DEFAULT_OPENAI_MODEL,
     DEFAULT_VERTEX_MODEL,
 )
-from src.youtube_bootlegger.core.settings import AppSettings, LlmProvider
+from src.youtube_bootlegger.core.settings import (
+    COOKIE_BROWSER_OPTIONS,
+    COOKIE_BROWSER_TOOLTIP,
+    AppSettings,
+    CookieBrowser,
+    LlmProvider,
+    format_ytdlp_age_or_cookie_error,
+)
 
 
 class FakeSettingsBackend:
@@ -185,3 +192,105 @@ class TestAutoFindTracklistSetting:
         backend = FakeSettingsBackend()
         backend.setValue("llm/auto_find_tracklist", "false")
         assert AppSettings(backend).auto_find_tracklist is False
+
+
+class TestCookieBrowserSettings:
+    def test_cookies_from_browser_defaults_to_none(self):
+        settings = AppSettings(FakeSettingsBackend())
+        assert settings.cookies_from_browser == CookieBrowser.NONE
+        assert settings.ytdlp_cookie_options() == {}
+        assert settings.ytdlp_cookie_cli_args() == []
+
+    def test_cookies_from_browser_round_trip(self):
+        settings = AppSettings(FakeSettingsBackend())
+        settings.cookies_from_browser = CookieBrowser.FIREFOX
+        assert settings.cookies_from_browser == CookieBrowser.FIREFOX
+        assert settings.ytdlp_cookie_options() == {"cookiesfrombrowser": ("firefox",)}
+        assert settings.ytdlp_cookie_cli_args() == ["--cookies-from-browser", "firefox"]
+
+    def test_cookies_from_browser_normalizes_and_rejects_invalid(self):
+        settings = AppSettings(FakeSettingsBackend())
+        settings.cookies_from_browser = "  Chrome  "
+        assert settings.cookies_from_browser == CookieBrowser.CHROME
+        settings.cookies_from_browser = "not-a-browser"
+        assert settings.cookies_from_browser == CookieBrowser.NONE
+
+    def test_tooltip_explains_windows_browser_lock(self):
+        assert "Windows" in COOKIE_BROWSER_TOOLTIP
+        assert "lock" in COOKIE_BROWSER_TOOLTIP.lower()
+
+    def test_age_restricted_error_without_browser_configured(self):
+        settings = AppSettings(FakeSettingsBackend())
+        msg = format_ytdlp_age_or_cookie_error(
+            "ERROR: [youtube] abc: Sign in to confirm your age. This video may be inappropriate for some users.",
+            settings,
+        )
+        assert msg is not None
+        assert "age-restricted" in msg
+        assert "Settings" in msg
+
+    def test_age_restricted_error_with_browser_configured(self):
+        settings = AppSettings(FakeSettingsBackend())
+        settings.cookies_from_browser = CookieBrowser.FIREFOX
+        msg = format_ytdlp_age_or_cookie_error(
+            "ERROR: Sign in to confirm your age",
+            settings,
+        )
+        assert msg is not None
+        assert "Firefox" in msg
+
+    def test_cookie_lock_error_with_browser_configured(self):
+        settings = AppSettings(FakeSettingsBackend())
+        settings.cookies_from_browser = CookieBrowser.CHROME
+        msg = format_ytdlp_age_or_cookie_error(
+            "PermissionError: Could not copy Chrome cookie database",
+            settings,
+        )
+        assert msg is not None
+        assert "Chrome" in msg
+        assert "Firefox" in msg
+
+    def test_extracted_cookies_plus_output_permission_error_is_not_cookie_lock(self):
+        settings = AppSettings(FakeSettingsBackend())
+        settings.cookies_from_browser = CookieBrowser.FIREFOX
+        output = (
+            "[cookies] Extracted 120 cookies from firefox\n"
+            "ERROR: unable to open for writing: [Errno 13] Permission denied: '/out/song.mp3'"
+        )
+        assert format_ytdlp_age_or_cookie_error(output, settings) is None
+
+    def test_safari_only_offered_on_macos_and_reports_unsupported_platform(self):
+        import sys
+
+        browsers = [browser for _, browser in COOKIE_BROWSER_OPTIONS]
+        assert (CookieBrowser.SAFARI in browsers) is (sys.platform == "darwin")
+
+        settings = AppSettings(FakeSettingsBackend())
+        settings.cookies_from_browser = CookieBrowser.SAFARI
+        msg = format_ytdlp_age_or_cookie_error(
+            "ValueError: unsupported platform: linux",
+            settings,
+        )
+        assert msg is not None
+        assert "macOS" in msg
+
+    def test_should_refetch_video_info(self):
+        from src.youtube_bootlegger.app_logic import fetch_config, should_refetch_video_info
+        from tests.qml_support import VALID_URL, make_video
+
+        s1 = AppSettings(FakeSettingsBackend())
+        s2 = AppSettings(FakeSettingsBackend())
+        s2.cookies_from_browser = CookieBrowser.FIREFOX
+
+        assert not should_refetch_video_info(
+            fetch_config(s1), fetch_config(s1), None, VALID_URL
+        )
+        assert should_refetch_video_info(
+            fetch_config(s1), fetch_config(s2), None, VALID_URL
+        )
+        assert not should_refetch_video_info(
+            fetch_config(s1), fetch_config(s2), make_video(), VALID_URL
+        )
+        assert not should_refetch_video_info(
+            fetch_config(s1), fetch_config(s2), None, "not-a-url"
+        )

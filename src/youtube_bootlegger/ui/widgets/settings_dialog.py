@@ -5,6 +5,7 @@ from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
@@ -28,7 +29,14 @@ from ...llm import (
     DEFAULT_OPENAI_MODEL,
     DEFAULT_VERTEX_MODEL,
 )
-from ...core.settings import AppSettings, LlmProvider, get_settings
+from ...core.settings import (
+    COOKIE_BROWSER_OPTIONS,
+    COOKIE_BROWSER_TOOLTIP,
+    AppSettings,
+    CookieBrowser,
+    LlmProvider,
+    get_settings,
+)
 
 
 PREFERRED_HEIGHT = 640
@@ -92,6 +100,25 @@ class SettingsDialog(QDialog):
             placeholder='Leave empty to use "ffmpeg" from PATH',
         )
         tools_form.addRow("ffmpeg path:", ffmpeg_row)
+
+        cookies_label_widget = QWidget()
+        cookies_label_layout = QHBoxLayout(cookies_label_widget)
+        cookies_label_layout.setContentsMargins(0, 0, 0, 0)
+        cookies_label_layout.setSpacing(4)
+        cookies_label = QLabel("Browser cookies:")
+        self._cookies_info_icon = QLabel("ⓘ")
+        self._cookies_info_icon.setToolTip(COOKIE_BROWSER_TOOLTIP)
+        self._cookies_info_icon.setCursor(Qt.CursorShape.WhatsThisCursor)
+        self._cookies_info_icon.setStyleSheet("color: gray; font-weight: bold;")
+        cookies_label_layout.addWidget(cookies_label)
+        cookies_label_layout.addWidget(self._cookies_info_icon)
+
+        self._cookies_browser_combo = QComboBox()
+        for label, browser in COOKIE_BROWSER_OPTIONS:
+            self._cookies_browser_combo.addItem(label, browser)
+        self._cookies_browser_combo.setToolTip(COOKIE_BROWSER_TOOLTIP)
+        tools_form.addRow(cookies_label_widget, self._cookies_browser_combo)
+
         layout.addWidget(tools_group)
 
         llm_group = QGroupBox("AI Assistant")
@@ -281,6 +308,8 @@ class SettingsDialog(QDialog):
         self._ytdlp_path_input.setText(self._settings.ytdlp_path)
         self._ffmpeg_path_input.setText(self._settings.ffmpeg_path)
         self._ytdlp_path_input.setEnabled(self._settings.use_external_ytdlp)
+        browser_index = self._cookies_browser_combo.findData(self._settings.cookies_from_browser)
+        self._cookies_browser_combo.setCurrentIndex(max(0, browser_index))
 
         self._openai_api_key.setText(self._settings.openai_api_key)
         self._openai_model.setText(self._settings.openai_model)
@@ -313,6 +342,10 @@ class SettingsDialog(QDialog):
         self._settings.use_external_ytdlp = self._use_external_checkbox.isChecked()
         self._settings.ytdlp_path = self._ytdlp_path_input.text()
         self._settings.ffmpeg_path = self._ffmpeg_path_input.text()
+        selected_browser = self._cookies_browser_combo.currentData()
+        self._settings.cookies_from_browser = (
+            selected_browser if selected_browser is not None else CookieBrowser.NONE
+        )
 
         self._settings.openai_api_key = self._openai_api_key.text()
         self._settings.openai_model = self._openai_model.text()

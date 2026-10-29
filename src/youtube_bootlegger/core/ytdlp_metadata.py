@@ -10,7 +10,7 @@ import subprocess
 import yt_dlp
 
 from .exceptions import ValidationError
-from .settings import AppSettings
+from .settings import AppSettings, format_ytdlp_age_or_cookie_error
 
 METADATA_TIMEOUT_SECONDS = 30
 # Comment extraction pages through many extra requests.
@@ -46,7 +46,7 @@ def _fetch(url: str, settings: AppSettings, comment_limit: int) -> dict:
     if settings.use_external_ytdlp:
         info = _fetch_external(url, settings, comment_limit)
     else:
-        info = _fetch_library(url, comment_limit)
+        info = _fetch_library(url, comment_limit, settings)
     if not _is_single_video(info):
         raise ValidationError("Expected information for a single video")
     return info
@@ -62,12 +62,13 @@ def _max_comments(limit: int) -> list[str]:
     return [str(limit), str(limit), "0", "0"]
 
 
-def _fetch_library(url: str, comment_limit: int):
+def _fetch_library(url: str, comment_limit: int, settings: AppSettings):
     options = {
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
         "skip_download": True,
+        **settings.ytdlp_cookie_options(),
     }
     if comment_limit:
         options.update({
@@ -85,15 +86,18 @@ def _fetch_library(url: str, comment_limit: int):
         with yt_dlp.YoutubeDL(options) as ydl:
             return ydl.extract_info(url, download=False)
     except yt_dlp.utils.DownloadError as e:
-        raise _fetch_error(str(e)) from e
+        raise _fetch_error(str(e), settings) from e
     except Exception as e:
+        friendly = format_ytdlp_age_or_cookie_error(str(e), settings)
+        if friendly:
+            raise ValidationError(friendly) from e
         raise ValidationError(f"Error fetching video info: {e}") from e
 
 
 def _fetch_external(url: str, settings: AppSettings, comment_limit: int):
     result = _run_external(url, settings, comment_limit)
     if result.returncode != 0:
-        raise _fetch_error((result.stderr or result.stdout or "").strip())
+        raise _fetch_error((result.stderr or result.stdout or "").strip(), settings)
 
     try:
         return json.loads(result.stdout)
@@ -103,7 +107,14 @@ def _fetch_external(url: str, settings: AppSettings, comment_limit: int):
 
 def _run_external(url: str, settings: AppSettings, comment_limit: int):
     command = settings.resolved_ytdlp_command()
-    cmd = [command, "--dump-single-json", "--no-warnings", "--no-playlist", "--skip-download"]
+    cmd = [
+        command,
+        "--dump-single-json",
+        "--no-warnings",
+        "--no-playlist",
+        "--skip-download",
+        *settings.ytdlp_cookie_cli_args(),
+    ]
     timeout = METADATA_TIMEOUT_SECONDS
     if comment_limit:
         cmd += [
@@ -135,8 +146,11 @@ def _run_external(url: str, settings: AppSettings, comment_limit: int):
         raise ValidationError(f"Could not run yt-dlp: {e}") from e
 
 
-def _fetch_error(message: str) -> ValidationError:
+def _fetch_error(message: str, settings: AppSettings) -> ValidationError:
     """Turn a yt-dlp failure message into a user-facing error."""
+    friendly = format_ytdlp_age_or_cookie_error(message, settings)
+    if friendly:
+        return ValidationError(friendly)
     lowered = message.lower()
     if "private" in lowered:
         return ValidationError("This video is private")

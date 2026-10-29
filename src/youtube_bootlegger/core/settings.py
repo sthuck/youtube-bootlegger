@@ -2,6 +2,7 @@
 
 from enum import StrEnum
 from pathlib import Path
+import sys
 from typing import Any, Protocol
 
 from PySide6.QtCore import QSettings
@@ -11,6 +12,7 @@ _APP_NAME = "YouTubeBootlegger"
 
 _USE_EXTERNAL_KEY = "ytdlp/use_external"
 _YTDLP_PATH_KEY = "ytdlp/path"
+_COOKIES_FROM_BROWSER_KEY = "ytdlp/cookies_from_browser"
 _FFMPEG_PATH_KEY = "ffmpeg/path"
 
 _LLM_PROVIDER_KEY = "llm/provider"
@@ -26,6 +28,60 @@ _COMPATIBLE_MODEL_KEY = "llm/compatible_model"
 _AUTO_FIND_TRACKLIST_KEY = "llm/auto_find_tracklist"
 _LOG_AI_REQUESTS_KEY = "llm/log_requests"
 AI_REQUEST_LOG_NAME = "ai-requests.log"
+
+
+class CookieBrowser(StrEnum):
+    """Supported browsers for yt-dlp --cookies-from-browser."""
+
+    NONE = ""
+    FIREFOX = "firefox"
+    CHROME = "chrome"
+    BRAVE = "brave"
+    EDGE = "edge"
+    SAFARI = "safari"
+    CHROMIUM = "chromium"
+    OPERA = "opera"
+    VIVALDI = "vivaldi"
+
+
+_ALL_COOKIE_BROWSER_OPTIONS: tuple[tuple[str, CookieBrowser], ...] = (
+    ("None (disabled)", CookieBrowser.NONE),
+    ("Firefox", CookieBrowser.FIREFOX),
+    ("Chrome", CookieBrowser.CHROME),
+    ("Brave", CookieBrowser.BRAVE),
+    ("Edge", CookieBrowser.EDGE),
+    ("Safari", CookieBrowser.SAFARI),
+    ("Chromium", CookieBrowser.CHROMIUM),
+    ("Opera", CookieBrowser.OPERA),
+    ("Vivaldi", CookieBrowser.VIVALDI),
+)
+
+COOKIE_BROWSER_OPTIONS: tuple[tuple[str, CookieBrowser], ...] = tuple(
+    (label, browser)
+    for label, browser in _ALL_COOKIE_BROWSER_OPTIONS
+    if browser != CookieBrowser.SAFARI or sys.platform == "darwin"
+)
+
+COOKIE_BROWSER_LABELS: dict[CookieBrowser, str] = {
+    browser: label for label, browser in _ALL_COOKIE_BROWSER_OPTIONS
+}
+
+COOKIE_BROWSER_TOOLTIP = (
+    "Reads YouTube login cookies from the selected browser to access "
+    "age-restricted videos. Note: on Windows, Chrome, Edge, and Brave lock "
+    "their cookie database while running — close the browser first or use Firefox."
+)
+
+
+def _parse_cookie_browser(value: CookieBrowser | str | None) -> CookieBrowser:
+    """Parse a stored or user-supplied cookie browser value."""
+    raw = str(value or "").strip().lower()
+    if not raw or raw == "none":
+        return CookieBrowser.NONE
+    try:
+        return CookieBrowser(raw)
+    except ValueError:
+        return CookieBrowser.NONE
 
 
 class LlmProvider(StrEnum):
@@ -94,6 +150,31 @@ class AppSettings:
     @ytdlp_path.setter
     def ytdlp_path(self, path: str) -> None:
         self._backend.setValue(_YTDLP_PATH_KEY, (path or "").strip())
+
+    @property
+    def cookies_from_browser(self) -> CookieBrowser:
+        return _parse_cookie_browser(self._backend.value(_COOKIES_FROM_BROWSER_KEY, ""))
+
+    @cookies_from_browser.setter
+    def cookies_from_browser(self, browser: CookieBrowser | str) -> None:
+        self._backend.setValue(
+            _COOKIES_FROM_BROWSER_KEY,
+            _parse_cookie_browser(browser).value,
+        )
+
+    def ytdlp_cookie_options(self) -> dict[str, Any]:
+        """Return yt-dlp Python API option dict for browser cookie extraction."""
+        browser = self.cookies_from_browser
+        if browser != CookieBrowser.NONE:
+            return {"cookiesfrombrowser": (browser.value,)}
+        return {}
+
+    def ytdlp_cookie_cli_args(self) -> list[str]:
+        """Return yt-dlp CLI arguments for browser cookie extraction."""
+        browser = self.cookies_from_browser
+        if browser != CookieBrowser.NONE:
+            return ["--cookies-from-browser", browser.value]
+        return []
 
     @property
     def ffmpeg_path(self) -> str:
@@ -239,6 +320,60 @@ class AppSettings:
     def sync(self) -> None:
         """Flush settings to persistent storage."""
         self._backend.sync()
+
+
+def _is_cookie_lock_line(line: str) -> bool:
+    """Return True if a single output/error line indicates a locked cookie database."""
+    if "extracted" in line and "cookies from" in line:
+        return False
+    return (
+        ("could not copy" in line and "cookie" in line)
+        or ("cookie" in line and "database is locked" in line)
+        or ("cookie" in line and "permission" in line)
+        or ("failed to decrypt" in line and "cookie" in line)
+    )
+
+
+def format_ytdlp_age_or_cookie_error(
+    error_text: str,
+    settings: AppSettings,
+) -> str | None:
+    """Return a user-friendly message for yt-dlp age-restriction or cookie lock errors."""
+    lowered = (error_text or "").lower()
+    browser = settings.cookies_from_browser
+    browser_label = COOKIE_BROWSER_LABELS.get(browser, browser.value.title())
+
+    if browser == CookieBrowser.SAFARI and "unsupported platform" in lowered:
+        return (
+            "Safari cookies are only supported on macOS. Select a different browser "
+            "in Settings."
+        )
+
+    if browser != CookieBrowser.NONE and any(
+        _is_cookie_lock_line(line) for line in lowered.splitlines()
+    ):
+        return (
+            f"Could not read cookies from {browser_label} (the browser may be locking "
+            "its cookie database). Close the browser and try again, or switch to Firefox "
+            "in Settings."
+        )
+
+    if (
+        "confirm your age" in lowered
+        or "age-restricted" in lowered
+        or "inappropriate for some users" in lowered
+    ):
+        if browser == CookieBrowser.NONE:
+            return (
+                "This video is age-restricted. Select a browser for cookies in Settings "
+                "to access it."
+            )
+        return (
+            f"This video is age-restricted. Make sure you are signed into YouTube in "
+            f"{browser_label} (or choose a different browser in Settings)."
+        )
+
+    return None
 
 
 _settings_instance: AppSettings | None = None

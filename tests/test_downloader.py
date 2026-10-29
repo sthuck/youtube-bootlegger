@@ -210,3 +210,60 @@ def test_external_executable_resolution_is_logged(tmp_path, monkeypatch):
     assert "yt-dlp executable: /app/.venv/bin/yt-dlp" in messages
     assert "WARNING: challenge solving failed" in messages
     assert "--no-warnings" not in popen.call_args.args[0]
+
+
+def test_library_passes_cookies_from_browser(tmp_path, monkeypatch):
+    from src.youtube_bootlegger.core.settings import CookieBrowser
+
+    seen_options = []
+
+    class FakeYoutubeDL:
+        def __init__(self, options):
+            seen_options.append(options)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def extract_info(self, url, download):
+            (tmp_path / "song.mp3").write_bytes(b"audio")
+            return {"title": "song"}
+
+        def prepare_filename(self, info):
+            return str(tmp_path / "song.webm")
+
+    monkeypatch.setattr(
+        "src.youtube_bootlegger.core.downloader.yt_dlp.YoutubeDL", FakeYoutubeDL
+    )
+    settings = make_settings()
+    settings.cookies_from_browser = CookieBrowser.FIREFOX
+    downloader = AudioDownloader(output_dir=tmp_path, settings=settings)
+
+    assert downloader.download("https://youtu.be/abc") == tmp_path / "song.mp3"
+    assert seen_options[0]["cookiesfrombrowser"] == ("firefox",)
+
+
+def test_external_passes_cookies_from_browser_and_handles_age_error(tmp_path, monkeypatch):
+    from unittest.mock import Mock
+    import pytest
+    from src.youtube_bootlegger.core.exceptions import DownloadError
+    from src.youtube_bootlegger.core.settings import CookieBrowser
+
+    process = Mock(stdout=iter(["ERROR: Sign in to confirm your age\n"]))
+    process.wait.return_value = 1
+    popen = Mock(return_value=process)
+    monkeypatch.setattr("src.youtube_bootlegger.core.downloader.subprocess.Popen", popen)
+
+    settings = make_settings(use_external=True)
+    settings.cookies_from_browser = CookieBrowser.CHROME
+    downloader = AudioDownloader(output_dir=tmp_path, settings=settings)
+
+    with pytest.raises(DownloadError) as exc_info:
+        downloader.download("https://youtu.be/abc")
+
+    cmd = popen.call_args.args[0]
+    assert "--cookies-from-browser" in cmd
+    assert cmd[cmd.index("--cookies-from-browser") + 1] == "chrome"
+    assert "Chrome" in str(exc_info.value)

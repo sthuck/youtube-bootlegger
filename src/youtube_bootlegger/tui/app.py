@@ -27,9 +27,11 @@ from ..app_logic import (
     build_job,
     check_ai_assist_ready,
     check_find_ready,
+    fetch_config,
     format_progress_stage,
     preview_comment_limit,
     should_auto_find,
+    should_refetch_video_info,
     summarize_preview,
     summarize_video,
     video_sources_log_line,
@@ -122,6 +124,7 @@ class BootleggerApp(App[None]):
         self._show_thumbnail = show_thumbnail
         self._video_info: VideoInfo | None = None
         self._last_fetched_url = ""
+        self._video_request_id = 0
         self._url_timer: Timer | None = None
         self._pipeline: DownloadSplitPipeline | None = None
         self._pipeline_stopped = threading.Event()
@@ -254,6 +257,7 @@ class BootleggerApp(App[None]):
         # previous video attached to a new URL, and in-flight results for the
         # old URL are dropped because they no longer match _last_fetched_url.
         self._last_fetched_url = ""
+        self._video_request_id += 1
         self._clear_video()
         if not url or not is_valid_youtube_url(url):
             return
@@ -264,24 +268,30 @@ class BootleggerApp(App[None]):
     def _start_video_info_fetch(self, url: str) -> None:
         self._last_fetched_url = url
         self._video_info = None
+        self._video_request_id += 1
+        request_id = self._video_request_id
         self.query_one(VideoPanel).show_loading()
-        self._in_background(self._load_video_info, url)
+        self._in_background(self._load_video_info, url, request_id)
 
-    def _load_video_info(self, url: str) -> None:
+    def _load_video_info(self, url: str, request_id: int) -> None:
         try:
             info = fetch_video_info(
                 url, self._settings, comment_limit=preview_comment_limit(self._settings)
             )
         except YouTubeBootleggerError as e:
-            self._post(self._on_video_info_error, url, str(e))
+            self._post(self._on_video_info_error, url, str(e), request_id)
             return
         except Exception as e:
-            self._post(self._on_video_info_error, url, f"Unexpected error: {e}")
+            self._post(self._on_video_info_error, url, f"Unexpected error: {e}", request_id)
             return
-        self._post(self._on_video_info_loaded, url, info)
+        self._post(self._on_video_info_loaded, url, info, request_id)
 
-    def _on_video_info_loaded(self, url: str, info: VideoInfo) -> None:
-        if url != self._last_fetched_url:
+    def _on_video_info_loaded(
+        self, url: str, info: VideoInfo, request_id: int | None = None
+    ) -> None:
+        if url != self._last_fetched_url or (
+            request_id is not None and request_id != self._video_request_id
+        ):
             return  # A newer URL was entered while this one was loading.
         self._video_info = info
         self.query_one(VideoPanel).show_video(summarize_video(info))
@@ -293,8 +303,12 @@ class BootleggerApp(App[None]):
         if should_auto_find(self._settings, info, self._tracklist_text()):
             self._start_find(info, manual=False)
 
-    def _on_video_info_error(self, url: str, message: str) -> None:
-        if url != self._last_fetched_url:
+    def _on_video_info_error(
+        self, url: str, message: str, request_id: int | None = None
+    ) -> None:
+        if url != self._last_fetched_url or (
+            request_id is not None and request_id != self._video_request_id
+        ):
             return
         self._video_info = None
         self._last_fetched_url = ""  # Allow retrying by re-entering the URL.
@@ -611,9 +625,17 @@ class BootleggerApp(App[None]):
         self.push_screen(HelpScreen(self.BINDINGS))
 
     def action_settings(self) -> None:
+        before = fetch_config(self._settings)
+
         def on_close(saved: bool | None) -> None:
             if saved:
                 self._notify("Settings saved.")
+                url = self.query_one("#url", Input).value.strip()
+                if not self.busy and should_refetch_video_info(
+                    before, fetch_config(self._settings), self._video_info, url
+                ):
+                    self._last_fetched_url = ""
+                    self._on_url_changed(url)
             self._refresh_find_ui()
 
         self.push_screen(SettingsScreen(self._settings), on_close)

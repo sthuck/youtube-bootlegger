@@ -344,3 +344,36 @@ def test_settings_dialog_fits_screen_with_buttons_visible(widgets_app, settings)
     assert save.isVisible()
     assert save.geometry().bottom() <= dialog.height()
     dialog.close()
+
+
+def test_settings_dialog_saves_cookies_from_browser_and_shows_tooltip(widgets_app, settings):
+    from src.youtube_bootlegger.core.settings import CookieBrowser
+
+    dialog = SettingsDialog(settings=settings)
+    assert "Windows" in dialog._cookies_info_icon.toolTip()
+    assert "lock" in dialog._cookies_info_icon.toolTip().lower()
+    idx = dialog._cookies_browser_combo.findData(CookieBrowser.FIREFOX)
+    dialog._cookies_browser_combo.setCurrentIndex(idx)
+    dialog._on_save()
+    assert settings.cookies_from_browser == CookieBrowser.FIREFOX
+    dialog.deleteLater()
+
+
+def test_saving_settings_preserves_invalid_url_error(window, settings, monkeypatch):
+    from PySide6.QtWidgets import QDialog
+    from src.youtube_bootlegger.core.settings import CookieBrowser
+
+    window._url_input._input.setText("not-a-valid-url")
+    window._url_input.set_error("Invalid YouTube URL")
+
+    class AcceptedDialog:
+        def __init__(self, parent=None):
+            pass
+
+        def exec(self):
+            settings.cookies_from_browser = CookieBrowser.FIREFOX
+            return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr("src.youtube_bootlegger.ui.main_window.SettingsDialog", AcceptedDialog)
+    window._open_settings_dialog()
+    assert window._url_input._error_label.text() == "Invalid YouTube URL"

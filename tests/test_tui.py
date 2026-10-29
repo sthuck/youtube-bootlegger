@@ -8,7 +8,7 @@ import pytest
 from textual.widgets import Button, Input, Static, TextArea
 
 from src.youtube_bootlegger.core.exceptions import DownloadError, ValidationError
-from src.youtube_bootlegger.core.settings import AppSettings, LlmProvider
+from src.youtube_bootlegger.core.settings import AppSettings, CookieBrowser, LlmProvider
 from src.youtube_bootlegger.core.video_info import VideoInfo
 from src.youtube_bootlegger.llm import (
     FindOutcome,
@@ -650,6 +650,9 @@ class TestDialogs:
             await pilot.press("f2")
             screen = app.screen
             assert isinstance(screen, SettingsScreen)
+            info_tooltip = screen.query_one("#cookies-browser-info").tooltip or ""
+            assert "Windows" in info_tooltip and "lock" in info_tooltip.lower()
+            screen.query_one("#setting-cookies-from-browser").value = CookieBrowser.FIREFOX
             screen.query_one("#setting-ffmpeg-path", Input).value = "/opt/ffmpeg"
             screen.query_one("#setting-llm-provider").value = LlmProvider.ANTHROPIC
             await pilot.pause()
@@ -658,6 +661,7 @@ class TestDialogs:
             screen.query_one("#setting-anthropic-api-key", Input).value = "key-123"
             await pilot.click("#settings-save")
             await pilot.pause()
+            assert settings.cookies_from_browser == CookieBrowser.FIREFOX
             assert settings.ffmpeg_path == "/opt/ffmpeg"
             assert settings.llm_provider == LlmProvider.ANTHROPIC
             assert settings.anthropic_api_key == "key-123"

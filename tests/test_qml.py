@@ -10,7 +10,7 @@ from PySide6.QtWidgets import QApplication
 
 from src.youtube_bootlegger.core.exceptions import DownloadError, ValidationError
 from src.youtube_bootlegger.core.pipeline import DownloadSplitPipeline
-from src.youtube_bootlegger.core.settings import AppSettings, LlmProvider
+from src.youtube_bootlegger.core.settings import AppSettings, CookieBrowser, LlmProvider
 from src.youtube_bootlegger.llm import DEFAULT_OPENAI_MODEL, LlmError
 from src.youtube_bootlegger.llm.client import OPENAI_CHAT_URL
 from src.youtube_bootlegger.qml_backend import AppBackend
@@ -201,6 +201,29 @@ class TestOutOfOrderVideoResults:
         wait_for_workers(backend)
 
         assert backend.videoLoaded is True
+        assert prop(window, "urlErrorText") == ""
+
+    def test_changing_cookie_browser_during_fetch_refetches_and_ignores_first_error(
+        self, qml_harness, gated_fetch
+    ):
+        window, backend, _settings = qml_harness
+        set_text(window, "urlField", VALID_URL)
+        wait_until(lambda: len(gated_fetch.calls) == 1)
+
+        open_settings(window)
+        click_item(window, "cookieBrowser_firefox")
+        # Clicking the already-selected browser must not start a third fetch.
+        click_item(window, "cookieBrowser_firefox")
+        click_item(window, "settingsDoneButton")
+        wait_until(lambda: len(gated_fetch.calls) == 2)
+
+        gated_fetch.calls[0].fail("This video is age-restricted.")
+        wait_until(lambda: backend._thread_pool.activeThreadCount() == 1)
+        QApplication.processEvents()
+        gated_fetch.calls[1].succeed("Age-Restricted Live Set")
+        wait_until(lambda: backend.videoLoaded)
+
+        assert prop(window, "videoTitleText") == "Age-Restricted Live Set"
         assert prop(window, "urlErrorText") == ""
 
 
@@ -809,6 +832,11 @@ class TestPanelsAndDialogs:
         assert backend.useExternalYtdlp is True
         assert prop(window, "ytdlpPathSection", "enabled") is True
 
+        assert "Windows" in prop(window, "cookiesBrowserInfoIcon", "tooltipText")
+        assert "lock" in prop(window, "cookiesBrowserInfoIcon", "tooltipText").lower()
+        click_item(window, "cookieBrowser_firefox")
+        assert backend.cookiesFromBrowser == "firefox"
+
         click_item(window, "provider_anthropic")
         assert backend.llmProvider == "anthropic"
         assert prop(window, "anthropicSection", "visible") is True
@@ -824,6 +852,7 @@ class TestPanelsAndDialogs:
         assert settings_panel.property("open") is False
         assert settings.use_external_ytdlp is True
         assert settings.ytdlp_path == "/opt/yt-dlp"
+        assert settings.cookies_from_browser == CookieBrowser.FIREFOX
         assert settings.ffmpeg_path == "/opt/ffmpeg"
         assert settings.llm_provider == LlmProvider.ANTHROPIC
         assert settings.anthropic_api_key == "sk-ant-123"
