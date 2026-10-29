@@ -10,7 +10,7 @@ from PySide6.QtWidgets import QApplication
 
 from src.youtube_bootlegger.core.exceptions import DownloadError, ValidationError
 from src.youtube_bootlegger.core.pipeline import DownloadSplitPipeline
-from src.youtube_bootlegger.core.settings import AppSettings, LlmProvider
+from src.youtube_bootlegger.core.settings import AppSettings, CookieBrowser, LlmProvider
 from src.youtube_bootlegger.llm import DEFAULT_OPENAI_MODEL, LlmError
 from src.youtube_bootlegger.llm.client import OPENAI_CHAT_URL
 from src.youtube_bootlegger.qml_backend import AppBackend
@@ -809,6 +809,11 @@ class TestPanelsAndDialogs:
         assert backend.useExternalYtdlp is True
         assert prop(window, "ytdlpPathSection", "enabled") is True
 
+        assert "Windows" in prop(window, "cookiesBrowserInfoIcon", "tooltipText")
+        assert "lock" in prop(window, "cookiesBrowserInfoIcon", "tooltipText").lower()
+        click_item(window, "cookieBrowser_firefox")
+        assert backend.cookiesFromBrowser == "firefox"
+
         click_item(window, "provider_anthropic")
         assert backend.llmProvider == "anthropic"
         assert prop(window, "anthropicSection", "visible") is True
@@ -824,6 +829,7 @@ class TestPanelsAndDialogs:
         assert settings_panel.property("open") is False
         assert settings.use_external_ytdlp is True
         assert settings.ytdlp_path == "/opt/yt-dlp"
+        assert settings.cookies_from_browser == CookieBrowser.FIREFOX
         assert settings.ffmpeg_path == "/opt/ffmpeg"
         assert settings.llm_provider == LlmProvider.ANTHROPIC
         assert settings.anthropic_api_key == "sk-ant-123"

@@ -115,7 +115,7 @@ Item {
                             onEditingFinished: backend.setYtdlpPath(text)
                             Text {
                                 anchors.fill: parent; verticalAlignment: Text.AlignVCenter
-                                text: "Leave empty to use \"yt-dlp\" from PATH"
+                                text: "Leave empty to use \"yt-dlp\" bundled tool, then PATH"
                                 color: root.colors.textMuted; font.pixelSize: 12
                                 visible: !ytdlpPathField.text && !ytdlpPathField.activeFocus
                             }
@@ -160,7 +160,7 @@ Item {
                             onEditingFinished: backend.setFfmpegPath(text)
                             Text {
                                 anchors.fill: parent; verticalAlignment: Text.AlignVCenter
-                                text: "Leave empty to use \"ffmpeg\" from PATH"
+                                text: "Leave empty to use \"ffmpeg\" bundled tool, then PATH"
                                 color: root.colors.textMuted; font.pixelSize: 12
                                 visible: !ffmpegPathField.text && !ffmpegPathField.activeFocus
                             }
@@ -184,6 +184,87 @@ Item {
                     text: backend.ffmpegMissing ? "FFmpeg not found at this location" : ""
                     color: root.colors.warning; font.pixelSize: 11
                     visible: backend.ffmpegMissing
+                }
+            }
+
+            /* ── browser cookies (age-restricted videos) ── */
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 6
+
+                RowLayout {
+                    spacing: 6
+                    Text {
+                        text: "Browser cookies (for age-restricted videos)"
+                        color: root.colors.textMuted
+                        font.pixelSize: 12
+                    }
+                    Rectangle {
+                        id: cookiesInfoBadge
+                        objectName: "cookiesBrowserInfoIcon"
+                        property string tooltipText: backend.cookiesBrowserTooltip
+                        width: 16; height: 16; radius: 8
+                        color: cookiesInfoMA.containsMouse ? root.colors.elevated : root.colors.surface
+                        border.color: root.colors.border; border.width: 1
+                        Text {
+                            anchors.centerIn: parent
+                            text: "i"
+                            color: root.colors.textSec
+                            font { pixelSize: 11; weight: Font.Bold }
+                        }
+                        MouseArea {
+                            id: cookiesInfoMA
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.WhatsThisCursor
+                        }
+                        ToolTip.visible: cookiesInfoMA.containsMouse
+                        ToolTip.delay: 150
+                        ToolTip.text: backend.cookiesBrowserTooltip
+                    }
+                }
+
+                GridLayout {
+                    Layout.fillWidth: true
+                    columns: 3
+                    rowSpacing: 6
+                    columnSpacing: 6
+
+                    Repeater {
+                        model: [
+                            { id: "", label: "None" },
+                            { id: "firefox", label: "Firefox" },
+                            { id: "chrome", label: "Chrome" },
+                            { id: "brave", label: "Brave" },
+                            { id: "edge", label: "Edge" },
+                            { id: "safari", label: "Safari" },
+                            { id: "chromium", label: "Chromium" },
+                            { id: "opera", label: "Opera" },
+                            { id: "vivaldi", label: "Vivaldi" }
+                        ]
+                        delegate: Rectangle {
+                            id: cookieBrowserDelegate
+                            required property var modelData
+                            Layout.fillWidth: true
+                            height: 30
+                            radius: root.colors.radiusSm
+                            color: backend.cookiesFromBrowser === cookieBrowserDelegate.modelData.id ? root.colors.elevated : root.colors.inputBg
+                            border.color: backend.cookiesFromBrowser === cookieBrowserDelegate.modelData.id ? root.colors.accent : root.colors.border
+                            border.width: 1
+                            Text {
+                                anchors.centerIn: parent
+                                text: cookieBrowserDelegate.modelData.label
+                                color: root.colors.text
+                                font.pixelSize: 12
+                            }
+                            MouseArea {
+                                objectName: "cookieBrowser_" + (cookieBrowserDelegate.modelData.id || "none")
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: backend.setCookiesFromBrowser(cookieBrowserDelegate.modelData.id)
+                            }
+                        }
+                    }
                 }
             }
 

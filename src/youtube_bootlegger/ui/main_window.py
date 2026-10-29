@@ -144,6 +144,9 @@ class MainWindow(QMainWindow):
         if dialog.exec():
             self._check_ffmpeg()
             self._update_ai_availability()
+            if self._video_preview.get_video_info() is None:
+                self._url_input.clear_error()
+                self._fetch_video_info()
 
     def _update_ai_availability(self) -> None:
         """Refresh the AI button and the finder rows from the current state.
@@ -440,6 +443,7 @@ class MainWindow(QMainWindow):
 
     def _on_video_info_error(self, message: str) -> None:
         """Handle video info fetch error."""
+        self._last_fetched_url = ""
         self._video_preview.set_error(message)
         self._url_input.set_error(message)
         self._update_ai_availability()

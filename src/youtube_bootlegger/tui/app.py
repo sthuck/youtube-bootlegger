@@ -614,6 +614,10 @@ class BootleggerApp(App[None]):
         def on_close(saved: bool | None) -> None:
             if saved:
                 self._notify("Settings saved.")
+                if self._video_info is None and not self.busy:
+                    url = self.query_one("#url", Input).value.strip()
+                    if url and is_valid_youtube_url(url):
+                        self._on_url_changed(url)
             self._refresh_find_ui()
 
         self.push_screen(SettingsScreen(self._settings), on_close)

@@ -10,6 +10,7 @@ from yt_dlp.extractor.common import InfoExtractor
 
 from src.youtube_bootlegger.core import ytdlp_metadata as metadata
 from src.youtube_bootlegger.core.exceptions import ValidationError
+from src.youtube_bootlegger.core.settings import CookieBrowser
 from tests.test_downloader import make_settings
 
 URL = "https://www.youtube.com/watch?v=fixture"
@@ -73,6 +74,19 @@ class TestExternal:
         )
         with pytest.raises(ValidationError, match="^This video is unavailable$"):
             metadata.fetch_info_dict(URL, make_settings(use_external=True, ytdlp_path=command))
+
+    def test_passes_cookies_from_browser_and_handles_age_error(self, monkeypatch):
+        run = fake_run(returncode=1, stderr="ERROR: Sign in to confirm your age")
+        monkeypatch.setattr(metadata.subprocess, "run", run)
+        settings = make_settings(use_external=True)
+        settings.cookies_from_browser = CookieBrowser.FIREFOX
+
+        with pytest.raises(ValidationError, match="Firefox"):
+            metadata.fetch_info_dict(URL, settings)
+
+        args = run.call_args.args[0]
+        options = yt_dlp.parse_options(args[1:]).ydl_opts
+        assert options["cookiesfrombrowser"][0] == "firefox"
 
     def test_other_failure_includes_diagnostic(self, monkeypatch):
         monkeypatch.setattr(metadata.subprocess, "run", fake_run(returncode=1, stderr="HTTP 429"))
@@ -183,6 +197,20 @@ class TestLibrary:
             side_effect=yt_dlp.utils.DownloadError("ERROR: Private video")))
         with pytest.raises(ValidationError, match="^This video is private$"):
             metadata.fetch_info_dict(URL, make_settings())
+
+    def test_library_passes_cookiesfrombrowser_and_handles_age_error(self, monkeypatch):
+        seen_opts = []
+
+        def fake_ydl(opts):
+            seen_opts.append(opts)
+            raise yt_dlp.utils.DownloadError("ERROR: Sign in to confirm your age")
+
+        monkeypatch.setattr(metadata.yt_dlp, "YoutubeDL", fake_ydl)
+        settings = make_settings()
+        settings.cookies_from_browser = CookieBrowser.BRAVE
+        with pytest.raises(ValidationError, match="Brave"):
+            metadata.fetch_info_dict(URL, settings)
+        assert seen_opts[0]["cookiesfrombrowser"] == ("brave",)
 
     def test_unexpected_error_is_validation_error(self, monkeypatch):
         monkeypatch.setattr(metadata.yt_dlp, "YoutubeDL", Mock(side_effect=RuntimeError("boom")))

@@ -12,7 +12,7 @@ import yt_dlp
 
 from .cancellation import CancelToken
 from .exceptions import DownloadError, OperationCancelledError
-from .settings import AppSettings, get_settings
+from .settings import AppSettings, format_ytdlp_age_or_cookie_error, get_settings
 
 _PROGRESS_RE = re.compile(r"\[download\]\s+(\d{1,3}(?:\.\d+)?)%")
 
@@ -103,6 +103,7 @@ class AudioDownloader:
             "postprocessor_hooks": [self._postprocessor_hook],
             "quiet": True,
             "logger": _DownloadLogger(self._log),
+            **self._settings.ytdlp_cookie_options(),
         }
 
         if self._settings.ffmpeg_path:
@@ -131,8 +132,14 @@ class AudioDownloader:
         except (OperationCancelledError, DownloadError):
             raise
         except yt_dlp.utils.DownloadError as e:
+            friendly = format_ytdlp_age_or_cookie_error(str(e), self._settings)
+            if friendly:
+                raise DownloadError(friendly) from e
             raise DownloadError(f"Download failed: {e}") from e
         except Exception as e:
+            friendly = format_ytdlp_age_or_cookie_error(str(e), self._settings)
+            if friendly:
+                raise DownloadError(friendly) from e
             raise DownloadError(f"Unexpected error during download: {e}") from e
 
     def _abort_if_cancelled(self) -> None:
@@ -195,6 +202,7 @@ class AudioDownloader:
         if self._settings.ffmpeg_path:
             cmd.extend(["--ffmpeg-location", self._settings.ffmpeg_path])
 
+        cmd.extend(self._settings.ytdlp_cookie_cli_args())
         cmd.append(url)
 
         self._log(f"yt-dlp executable: {shutil.which(command) or command}")
@@ -228,6 +236,9 @@ class AudioDownloader:
         self._cancel.raise_if_cancelled()
         if returncode != 0:
             tail = "\n".join(output_lines[-10:])
+            friendly = format_ytdlp_age_or_cookie_error(tail, self._settings)
+            if friendly:
+                raise DownloadError(friendly)
             raise DownloadError(f"yt-dlp failed (exit code {returncode}): {tail}")
 
         audio_path = self._latest_output_file()

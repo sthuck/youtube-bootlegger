@@ -10,7 +10,12 @@ from textual.widgets import Button, Input, Label, Select, Static, Switch
 
 from ...app_logic import AI_PROVIDERS_NOTE, LOG_AI_REQUESTS_LABEL, log_ai_requests_note
 from ...app_logic.track_finder import AUTO_FIND_SETTING_LABEL, AUTO_FIND_SETTING_NOTE
-from ...core.settings import AppSettings, LlmProvider
+from ...core.settings import (
+    COOKIE_BROWSER_OPTIONS,
+    COOKIE_BROWSER_TOOLTIP,
+    AppSettings,
+    LlmProvider,
+)
 from ...llm import (
     DEFAULT_ANTHROPIC_MODEL,
     DEFAULT_COMPATIBLE_MODEL,
@@ -58,8 +63,8 @@ PROVIDER_FIELDS: dict[LlmProvider, tuple[SettingField, ...]] = {
 }
 
 TOOL_FIELDS = (
-    SettingField("ytdlp_path", "yt-dlp path", 'Leave empty to use "yt-dlp" from PATH'),
-    SettingField("ffmpeg_path", "ffmpeg path", 'Leave empty to use "ffmpeg" from PATH'),
+    SettingField("ytdlp_path", "yt-dlp path", 'Leave empty to use "yt-dlp" bundled tool, then PATH'),
+    SettingField("ffmpeg_path", "ffmpeg path", 'Leave empty to use "ffmpeg" bundled tool, then PATH'),
 )
 
 
@@ -101,6 +106,15 @@ class SettingsScreen(ModalScreen[bool]):
                 for field in TOOL_FIELDS:
                     yield from _field_widgets(field, s)
                 yield Static("", id="ffmpeg-warning", classes="field-error")
+                with Horizontal(classes="label-row"):
+                    yield Label("Browser cookies (age-restricted videos)", classes="field-label")
+                    yield Static(" ⓘ", id="cookies-browser-info", classes="info-icon")
+                yield Select(
+                    COOKIE_BROWSER_OPTIONS,
+                    value=s.cookies_from_browser,
+                    allow_blank=False,
+                    id="setting-cookies-from-browser",
+                )
 
                 yield Static("AI ASSISTANT", classes="section-title")
                 yield Static(AI_PROVIDERS_NOTE, classes="muted")
@@ -129,6 +143,8 @@ class SettingsScreen(ModalScreen[bool]):
     def on_mount(self) -> None:
         self._show_provider_fields(self._settings.llm_provider)
         self._refresh_ffmpeg_warning(self._settings.ffmpeg_path)
+        self.query_one("#cookies-browser-info", Static).tooltip = COOKIE_BROWSER_TOOLTIP
+        self.query_one("#setting-cookies-from-browser", Select).tooltip = COOKIE_BROWSER_TOOLTIP
 
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id == "setting-llm-provider":
@@ -148,6 +164,7 @@ class SettingsScreen(ModalScreen[bool]):
     def action_save(self) -> None:
         s = self._settings
         s.use_external_ytdlp = self.query_one("#setting-use-external-ytdlp", Switch).value
+        s.cookies_from_browser = self.query_one("#setting-cookies-from-browser", Select).value
         s.llm_provider = self.query_one("#setting-llm-provider", Select).value
         s.auto_find_tracklist = self.query_one("#setting-auto-find-tracklist", Switch).value
         s.log_ai_requests = self.query_one("#setting-log-ai-requests", Switch).value

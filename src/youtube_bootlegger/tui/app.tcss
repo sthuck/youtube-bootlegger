@@ -273,6 +273,12 @@ ModalScreen {
     height: auto;
 }
 
+.info-icon {
+    width: auto;
+    color: $secondary;
+    margin-top: 1;
+}
+
 #confirm-dialog {
     width: 60;
 }

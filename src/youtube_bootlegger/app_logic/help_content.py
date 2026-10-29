@@ -147,6 +147,7 @@ def build_help_content() -> dict:
         "troubleshootingTitle": "TROUBLESHOOTING",
         "troubleshooting": [
             "FFmpeg not found — install FFmpeg or set its path in Settings.",
+            "Age-restricted video — select a signed-in browser under Browser cookies in Settings (on Windows, close Chrome/Edge/Brave first or use Firefox).",
             "Invalid URL — use a standard YouTube watch or youtu.be link.",
             "Red preview rows — a line does not match the template. Check placeholders and timestamp format.",
             "Cannot start — artist name is required. Fix any template or directory errors shown in red.",

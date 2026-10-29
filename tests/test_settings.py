@@ -5,7 +5,13 @@ from src.youtube_bootlegger.llm import (
     DEFAULT_OPENAI_MODEL,
     DEFAULT_VERTEX_MODEL,
 )
-from src.youtube_bootlegger.core.settings import AppSettings, LlmProvider
+from src.youtube_bootlegger.core.settings import (
+    COOKIE_BROWSER_TOOLTIP,
+    AppSettings,
+    CookieBrowser,
+    LlmProvider,
+    format_ytdlp_age_or_cookie_error,
+)
 
 
 class FakeSettingsBackend:
@@ -185,3 +191,60 @@ class TestAutoFindTracklistSetting:
         backend = FakeSettingsBackend()
         backend.setValue("llm/auto_find_tracklist", "false")
         assert AppSettings(backend).auto_find_tracklist is False
+
+
+class TestCookieBrowserSettings:
+    def test_cookies_from_browser_defaults_to_none(self):
+        settings = AppSettings(FakeSettingsBackend())
+        assert settings.cookies_from_browser == CookieBrowser.NONE
+        assert settings.ytdlp_cookie_options() == {}
+        assert settings.ytdlp_cookie_cli_args() == []
+
+    def test_cookies_from_browser_round_trip(self):
+        settings = AppSettings(FakeSettingsBackend())
+        settings.cookies_from_browser = CookieBrowser.FIREFOX
+        assert settings.cookies_from_browser == CookieBrowser.FIREFOX
+        assert settings.ytdlp_cookie_options() == {"cookiesfrombrowser": ("firefox",)}
+        assert settings.ytdlp_cookie_cli_args() == ["--cookies-from-browser", "firefox"]
+
+    def test_cookies_from_browser_normalizes_and_rejects_invalid(self):
+        settings = AppSettings(FakeSettingsBackend())
+        settings.cookies_from_browser = "  Chrome  "
+        assert settings.cookies_from_browser == CookieBrowser.CHROME
+        settings.cookies_from_browser = "not-a-browser"
+        assert settings.cookies_from_browser == CookieBrowser.NONE
+
+    def test_tooltip_explains_windows_browser_lock(self):
+        assert "Windows" in COOKIE_BROWSER_TOOLTIP
+        assert "lock" in COOKIE_BROWSER_TOOLTIP.lower()
+
+    def test_age_restricted_error_without_browser_configured(self):
+        settings = AppSettings(FakeSettingsBackend())
+        msg = format_ytdlp_age_or_cookie_error(
+            "ERROR: [youtube] abc: Sign in to confirm your age. This video may be inappropriate for some users.",
+            settings,
+        )
+        assert msg is not None
+        assert "age-restricted" in msg
+        assert "Settings" in msg
+
+    def test_age_restricted_error_with_browser_configured(self):
+        settings = AppSettings(FakeSettingsBackend())
+        settings.cookies_from_browser = CookieBrowser.FIREFOX
+        msg = format_ytdlp_age_or_cookie_error(
+            "ERROR: Sign in to confirm your age",
+            settings,
+        )
+        assert msg is not None
+        assert "Firefox" in msg
+
+    def test_cookie_lock_error_with_browser_configured(self):
+        settings = AppSettings(FakeSettingsBackend())
+        settings.cookies_from_browser = CookieBrowser.CHROME
+        msg = format_ytdlp_age_or_cookie_error(
+            "PermissionError: Could not copy Chrome cookie database",
+            settings,
+        )
+        assert msg is not None
+        assert "Chrome" in msg
+        assert "Firefox" in msg
