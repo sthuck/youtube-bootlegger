@@ -87,6 +87,8 @@ binaries and their included dependencies through a license-compliant method.
 Upstream links alone are not a substitute for the publisher's obligations.
 This PR's packaging automation does not construct that source distribution or
 claim a complete transitive third-party license audit of the downloaded binaries.
+The native test workflow runs the tools on its runners without publishing tool
+artifacts; publishing release archives awaits that source-distribution work.
 
 The script refuses FFmpeg builds configured with `--enable-nonfree`. The existing
 Mutagen and Qt/PySide dependencies have their own licensing obligations; this

@@ -58,7 +58,3 @@ jobs:
       - name: Verify actual Nuitka macOS app discovery
         if: runner.os == 'macOS'
         run: uv run python scripts/check_nuitka_bundle.py --macos-app --tools-dir "${{ runner.temp }}/Installed App/tools"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: runtime-tools-${{ matrix.platform }}
-          path: ${{ runner.temp }}/Installed App/tools
