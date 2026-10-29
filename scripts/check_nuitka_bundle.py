@@ -35,6 +35,10 @@ if __name__ == "__main__":
         if macos_app:
             app = output / "probe.app"
             shutil.copytree(tools_dir, app / "Contents/Resources/tools")
+            subprocess.run([
+                "codesign", "--force", "--sign", "-", "--preserve-metadata=entitlements", str(app),
+            ], check=True)
+            subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], check=True)
             executable = app / "Contents/MacOS/probe"
         else:
             shutil.copytree(tools_dir, output / "tools")
