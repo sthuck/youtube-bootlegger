@@ -4,6 +4,7 @@ from .directory_picker import DirectoryPickerWidget
 from .metadata_input import MetadataInputWidget
 from .progress_panel import ProgressPanelWidget
 from .settings_dialog import SettingsDialog
+from .tools_banner import ToolsBannerWidget
 from .tracklist_input import TracklistInputWidget
 from .url_input import UrlInputWidget
 from .video_preview import VideoPreviewWidget
@@ -13,6 +14,7 @@ __all__ = [
     "MetadataInputWidget",
     "ProgressPanelWidget",
     "SettingsDialog",
+    "ToolsBannerWidget",
     "TracklistInputWidget",
     "UrlInputWidget",
     "VideoPreviewWidget",

@@ -13,6 +13,8 @@ ApplicationWindow {
     visible: true
     color: _c.bg
 
+    onClosing: backend.tools.shutdown()
+
     menuBar: MenuBar {
         Menu {
             title: qsTr("&File")
@@ -100,10 +102,20 @@ ApplicationWindow {
         }
     }
 
+    /* ── runtime tools banner ──────────────────────────────── */
+    ToolsBanner {
+        id: toolsBanner
+        objectName: "toolsBanner"
+        anchors { left: parent.left; right: parent.right; top: header.bottom }
+        height: implicitHeight
+        colors: _c
+        z: 9
+    }
+
     /* ── main content ──────────────────────────────────────── */
     RowLayout {
         anchors {
-            top: header.bottom; left: parent.left
+            top: toolsBanner.bottom; left: parent.left
             right: parent.right; bottom: parent.bottom
             margins: 20
         }
@@ -344,12 +356,14 @@ ApplicationWindow {
                 spacing: 8
 
                 Rectangle {
+                    readonly property bool canStart:
+                        !backend.busy && backend.tools.startBlockedReason === ""
                     Layout.fillWidth: true; height: 44
                     radius: _c.radiusSm
-                    opacity: backend.busy ? 0.5 : 1.0
+                    opacity: canStart ? 1.0 : 0.5
                     gradient: Gradient {
                         orientation: Gradient.Horizontal
-                        GradientStop { position: 0; color: startMA.containsMouse && !backend.busy ? _c.accentHover : _c.accent }
+                        GradientStop { position: 0; color: startMA.containsMouse && startMA.enabled ? _c.accentHover : _c.accent }
                         GradientStop { position: 1; color: _c.accentLight }
                     }
                     Behavior on opacity { NumberAnimation { duration: 200 } }
@@ -365,9 +379,18 @@ ApplicationWindow {
                         objectName: "startButton"
                         anchors.fill: parent
                         hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                        enabled: !backend.busy
+                        enabled: parent.canStart
                         onClicked: backend.startPipeline()
                     }
+                }
+
+                Text {
+                    objectName: "startBlockedText"
+                    text: backend.tools.startBlockedReason
+                    visible: text !== ""
+                    color: _c.warning; font.pixelSize: 11
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
                 }
 
                 Rectangle {
@@ -474,16 +497,6 @@ ApplicationWindow {
                     MouseArea { id: closeBtnMA; objectName: "msgCloseButton"; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: msgOverlay.visible = false }
                 }
             }
-        }
-    }
-
-    /* ── ffmpeg warning on startup ─────────────────────────── */
-    Component.onCompleted: {
-        if (backend.ffmpegMissing) {
-            msgTitle.text = "FFmpeg Not Found"
-            msgBody.text = "FFmpeg is not installed or not in your PATH.\nPlease install FFmpeg to use this application."
-            msgStrip.color = _c.warning
-            msgOverlay.visible = true
         }
     }
 }

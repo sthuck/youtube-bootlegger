@@ -34,6 +34,7 @@ from src.youtube_bootlegger.workers import (
     VideoInfoWorker,
 )
 from tests.test_downloader import make_settings
+from tests.tools_support import fake_path
 
 URL = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 OTHER_URL = "https://www.youtube.com/watch?v=jNQXAC9IVRw"
@@ -111,11 +112,10 @@ def settings():
 
 @pytest.fixture
 def window(widgets_app, settings, monkeypatch):
-    monkeypatch.setattr(main_window_module, "get_settings", lambda: settings)
-    monkeypatch.setattr(main_window_module, "is_ffmpeg_available", lambda _command: True)
+    fake_path(monkeypatch, {"ffmpeg", "ffprobe"})
     monkeypatch.setattr(main_window_module, "QMessageBox", FakeMessageBox)
     FakeMessageBox.shown = []
-    window = main_window_module.MainWindow()
+    window = main_window_module.MainWindow(settings=settings)
     window._thread_pool = FakePool()
     yield window
     window.deleteLater()
@@ -334,6 +334,25 @@ def test_settings_dialog_saves_auto_find(widgets_app, settings):
     dialog.deleteLater()
 
 
+def test_settings_dialog_rejects_extra_ytdlp_options_that_break_the_app(widgets_app, settings):
+    dialog = SettingsDialog(settings=settings)
+    dialog.show()
+    dialog._extra_args_input.setText("--limit-rate 2M -o out.mp3")
+    dialog._on_save()
+    assert dialog.isVisible() and dialog.result() == 0
+    assert dialog._extra_args_error.text() == (
+        "Extra yt-dlp options: '-o' can't be used: the app sets this itself."
+    )
+    assert settings.ytdlp_extra_args == ""
+
+    dialog._extra_args_input.setText("--limit-rate 2M")
+    assert dialog._extra_args_error.isHidden()
+    dialog._on_save()
+    assert settings.ytdlp_extra_args == "--limit-rate 2M"
+    assert SettingsDialog(settings=settings)._extra_args_input.text() == "--limit-rate 2M"
+    dialog.deleteLater()
+
+
 def test_settings_dialog_fits_screen_with_buttons_visible(widgets_app, settings):
     dialog = SettingsDialog(settings=settings)
     dialog.show()
@@ -367,7 +386,14 @@ def test_saving_settings_preserves_invalid_url_error(window, settings, monkeypat
     window._url_input.set_error("Invalid YouTube URL")
 
     class AcceptedDialog:
-        def __init__(self, parent=None):
+        tools_download_requested = tools_verify_requested = type(
+            "FakeSignal", (), {"connect": lambda self, slot: None}
+        )()
+
+        def __init__(self, parent=None, settings=None):
+            pass
+
+        def deleteLater(self):
             pass
 
         def exec(self):

@@ -7,12 +7,16 @@ from typing import Any, Protocol
 
 from PySide6.QtCore import QSettings
 
+from .tools import ToolStatus, ToolStore, default_tools_dir, tool_status
+from .ytdlp_extra_args import parse_extra_args
+
 _ORG_NAME = "YouTubeBootlegger"
 _APP_NAME = "YouTubeBootlegger"
 
 _USE_EXTERNAL_KEY = "ytdlp/use_external"
 _YTDLP_PATH_KEY = "ytdlp/path"
 _COOKIES_FROM_BROWSER_KEY = "ytdlp/cookies_from_browser"
+_YTDLP_EXTRA_ARGS_KEY = "ytdlp/extra_args"
 _FFMPEG_PATH_KEY = "ffmpeg/path"
 
 _LLM_PROVIDER_KEY = "llm/provider"
@@ -121,23 +125,55 @@ class AppSettings:
         use_external_ytdlp: When enabled, invoke the yt-dlp CLI binary via
             subprocess instead of the bundled yt-dlp Python library.
         ytdlp_path: Custom path to the yt-dlp executable. Only consulted
-            when use_external_ytdlp is enabled; falls back to "yt-dlp" on
-            PATH when left empty.
-        ffmpeg_path: Custom path to the ffmpeg executable. Falls back to
-            "ffmpeg" on PATH when left empty.
+            when use_external_ytdlp is enabled. When empty, prefer the
+            downloaded executable, then "yt-dlp" on PATH.
+        ffmpeg_path: Custom path to FFmpeg. When empty, prefer the
+            downloaded executable, then "ffmpeg" on PATH.
+
+    Args:
+        backend: Storage; defaults to the user's QSettings file.
+        tools_dir: Folder for downloaded tools. Defaults to the per-user
+            data folder when settings are stored in a file, and to None
+            (no downloaded tools) for in-memory backends, so tests never
+            read or write the real folder.
     """
 
-    def __init__(self, backend: SettingsBackend | None = None):
+    def __init__(self, backend: SettingsBackend | None = None, *, tools_dir: Path | None = None):
         self._backend = backend or QSettings(
             QSettings.Format.IniFormat,
             QSettings.Scope.UserScope,
             _ORG_NAME,
             _APP_NAME,
         )
+        self._tools_dir = tools_dir
+
+    @property
+    def tools_dir(self) -> Path | None:
+        if self._tools_dir is not None:
+            return self._tools_dir
+        return default_tools_dir() if self._settings_file() else None
+
+    @property
+    def tool_store(self) -> ToolStore:
+        return ToolStore(self.tools_dir)
+
+    def tool_statuses(self) -> list[ToolStatus]:
+        """Where yt-dlp, FFmpeg and Deno come from, and which need downloading.
+
+        yt-dlp is always downloaded unless a custom path is set; FFmpeg and
+        Deno found on PATH are used as they are.
+        """
+        store = self.tool_store
+        return [
+            tool_status("yt-dlp", store, custom_path=self.ytdlp_path, use_path=False),
+            tool_status("ffmpeg", store, custom_path=self.ffmpeg_path),
+            tool_status("deno", store),
+        ]
 
     @property
     def use_external_ytdlp(self) -> bool:
-        return _to_bool(self._backend.value(_USE_EXTERNAL_KEY, False))
+        default = self.tool_store.executable("yt-dlp") is not None
+        return _to_bool(self._backend.value(_USE_EXTERNAL_KEY, default))
 
     @use_external_ytdlp.setter
     def use_external_ytdlp(self, enabled: bool) -> None:
@@ -177,6 +213,34 @@ class AppSettings:
         return []
 
     @property
+    def ytdlp_extra_args(self) -> str:
+        """Extra yt-dlp options typed in Settings (see ytdlp_extra_args.py)."""
+        return str(self._backend.value(_YTDLP_EXTRA_ARGS_KEY, "") or "")
+
+    @ytdlp_extra_args.setter
+    def ytdlp_extra_args(self, text: str) -> None:
+        """Raises ValidationError, storing nothing, when yt-dlp would reject it."""
+        text = (text or "").strip()
+        parse_extra_args(text)
+        self._backend.setValue(_YTDLP_EXTRA_ARGS_KEY, text)
+
+    def ytdlp_extra_options(self) -> dict[str, Any]:
+        """The extra options as Python API options. Raises ValidationError."""
+        return parse_extra_args(self.ytdlp_extra_args)[1]
+
+    def ytdlp_config_cli_args(self) -> list[str]:
+        """Arguments that go right after the yt-dlp executable. Raises ValidationError.
+
+        yt-dlp reads config files (system-wide, ~/.config/yt-dlp/config, next
+        to the executable, the current folder) that can change where files go
+        or what it prints. The app's own yt-dlp ignores them; a yt-dlp path set
+        in Settings reads them, since whoever brings their own yt-dlp manages
+        its config too. Extra options from Settings apply either way.
+        """
+        ignore = [] if self.ytdlp_path else ["--ignore-config"]
+        return ignore + parse_extra_args(self.ytdlp_extra_args)[0]
+
+    @property
     def ffmpeg_path(self) -> str:
         return str(self._backend.value(_FFMPEG_PATH_KEY, "") or "")
 
@@ -186,11 +250,40 @@ class AppSettings:
 
     def resolved_ytdlp_command(self) -> str:
         """Return the yt-dlp executable to invoke when running in external mode."""
-        return self.ytdlp_path or "yt-dlp"
+        return self.ytdlp_path or str(self.tool_store.executable("yt-dlp") or "yt-dlp")
 
     def resolved_ffmpeg_command(self) -> str:
         """Return the ffmpeg executable to invoke."""
-        return self.ffmpeg_path or "ffmpeg"
+        return self.ffmpeg_path or str(self.tool_store.executable("ffmpeg") or "ffmpeg")
+
+    def ytdlp_tool_options(self) -> dict[str, Any]:
+        """Explicit companion tool locations for the Python API."""
+        options: dict[str, Any] = {}
+        ffmpeg = self.resolved_ffmpeg_command()
+        if ffmpeg != "ffmpeg":
+            options["ffmpeg_location"] = ffmpeg
+        deno = self.tool_store.executable("deno")
+        if deno:
+            options["js_runtimes"] = {"deno": {"path": str(deno)}}
+        return options
+
+    def ytdlp_tool_cli_args(self) -> list[str]:
+        """Explicit companion paths; argv lists preserve spaces on every OS."""
+        options = self.ytdlp_tool_options()
+        args = ["--encoding", "utf-8"]
+        if "ffmpeg_location" in options:
+            args.extend(["--ffmpeg-location", options["ffmpeg_location"]])
+        # Only the downloaded (pinned) yt-dlp is known to accept --js-runtimes.
+        # A user-chosen or PATH copy may predate it (2025.11) and would reject
+        # it. Such a copy only finds a Deno on PATH, not the downloaded one:
+        # whoever brings their own yt-dlp manages its JS runtime too.
+        downloaded_ytdlp = self.tool_store.executable("yt-dlp")
+        runs_downloaded = (
+            downloaded_ytdlp is not None and self.resolved_ytdlp_command() == str(downloaded_ytdlp)
+        )
+        if "js_runtimes" in options and runs_downloaded:
+            args.extend(["--js-runtimes", f"deno:{options['js_runtimes']['deno']['path']}"])
+        return args
 
     @property
     def llm_provider(self) -> LlmProvider:
@@ -312,10 +405,14 @@ class AppSettings:
 
         None when the settings aren't stored in a file (e.g. in tests).
         """
+        settings_file = self._settings_file()
+        return settings_file.parent / AI_REQUEST_LOG_NAME if settings_file else None
+
+    def _settings_file(self) -> Path | None:
         file_name = getattr(self._backend, "fileName", None)
         if not callable(file_name) or not file_name():
             return None
-        return Path(file_name()).parent / AI_REQUEST_LOG_NAME
+        return Path(file_name())
 
     def sync(self) -> None:
         """Flush settings to persistent storage."""

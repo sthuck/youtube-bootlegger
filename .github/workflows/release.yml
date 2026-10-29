@@ -20,7 +20,7 @@ jobs:
             platform: linux-x64
           - os: windows-latest
             platform: windows-x64
-          - os: macos-14
+          - os: macos-15
             platform: macos-arm64
 
     steps:
@@ -94,8 +94,8 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $asset = "youtube-bootlegger-${{ github.event.release.tag_name }}-windows-x64.zip"
-          Compress-Archive -Path YouTubeBootlegger.exe -DestinationPath $asset
+          $asset = "youtube-bootlegger-${{ github.event.release.tag_name }}-windows-x64.exe"
+          Copy-Item YouTubeBootlegger.exe $asset
           Add-Content -Path $env:GITHUB_ENV -Value "ASSET_PATH=$asset"
 
       - name: Package artifact (macOS)

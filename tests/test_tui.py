@@ -28,6 +28,7 @@ from src.youtube_bootlegger.tui.screens import (
 )
 from src.youtube_bootlegger.tui.screens.help import build_help_markdown
 from src.youtube_bootlegger.tui.widgets import StatusLog, TrackPreviewTable
+from tests.tools_support import fake_path
 
 VALID_URL = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 SIZE = (140, 45)
@@ -125,7 +126,7 @@ def fake_video(monkeypatch):
         return make_video()
 
     monkeypatch.setattr(app_module, "fetch_video_info", fetch)
-    monkeypatch.setattr(app_module, "is_ffmpeg_available", lambda cmd: True)
+    fake_path(monkeypatch, {"ffmpeg", "ffprobe"})
     monkeypatch.setattr(app_module, "URL_DEBOUNCE_SECONDS", 0.01)
     return calls
 
@@ -665,6 +666,30 @@ class TestDialogs:
             assert settings.ffmpeg_path == "/opt/ffmpeg"
             assert settings.llm_provider == LlmProvider.ANTHROPIC
             assert settings.anthropic_api_key == "key-123"
+
+    async def test_settings_rejects_extra_ytdlp_options_that_break_the_app(
+        self, settings, fake_video
+    ):
+        app = make_app(settings)
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.press("f2")
+            screen = app.screen
+            screen.query_one("#setting-ffmpeg-path", Input).value = "/opt/ffmpeg"
+            screen.query_one("#setting-ytdlp-extra-args", Input).value = "--exec 'rm x'"
+            await pilot.click("#settings-save")
+            await pilot.pause()
+            assert app.screen is screen
+            error = str(screen.query_one("#extra-args-error").render())
+            assert error == "Extra yt-dlp options: '--exec' can't be used: the app sets this itself."
+            assert settings.ffmpeg_path == ""  # nothing saved
+
+            screen.query_one("#setting-ytdlp-extra-args", Input).value = "--proxy socks5://h:1"
+            await pilot.pause()
+            assert str(screen.query_one("#extra-args-error").render()) == ""
+            await pilot.click("#settings-save")
+            await pilot.pause()
+            assert settings.ytdlp_extra_args == "--proxy socks5://h:1"
+            assert settings.ffmpeg_path == "/opt/ffmpeg"
 
     @pytest.mark.parametrize("size", [(80, 24), (100, 30), (160, 50)])
     async def test_settings_buttons_fit_on_screen(self, settings, fake_video, size):

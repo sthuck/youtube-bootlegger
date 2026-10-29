@@ -139,8 +139,8 @@ def build_help_content() -> dict:
         ),
         "requirementsTitle": "REQUIREMENTS",
         "requirements": [
-            "FFmpeg — required for splitting audio. Install it or set a custom path in Settings.",
-            "yt-dlp — bundled with the app. An external binary is optional in Settings.",
+            "FFmpeg, yt-dlp and Deno — downloaded automatically on first start "
+            "(FFmpeg and Deno already on PATH are used instead). Custom paths are optional in Settings.",
             "AI provider — optional, only needed for AI Assist. Finding track lists "
             "needs an API model; ChatGPT Lite can only detect the format.",
         ],

@@ -24,6 +24,7 @@ class UrlInputWidget(QWidget):
         layout.addWidget(self._label)
 
         self._input = QLineEdit()
+        self._input.setObjectName("urlField")
         self._input.setPlaceholderText(
             "https://www.youtube.com/watch?v=... or https://youtu.be/..."
         )

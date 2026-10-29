@@ -26,6 +26,31 @@
     display: none;
 }
 
+/* Runtime-tool downloads: progress, errors, Cancel / Retry / Download. */
+#tools-banner {
+    height: auto;
+    background: $boost;
+    padding: 0 1;
+    display: none;
+}
+
+#tools-banner.-error {
+    color: $error;
+}
+
+#tools-banner-text {
+    width: 1fr;
+}
+
+#tools-banner-progress {
+    width: 32;
+}
+
+#tools-banner-action {
+    margin-left: 1;
+    min-width: 10;
+}
+
 /* ── Track list + preview ───────────────────────────────────── */
 
 #tracks {
@@ -277,6 +302,20 @@ ModalScreen {
     width: auto;
     color: $secondary;
     margin-top: 1;
+}
+
+#tools-statuses,
+#tools-folder {
+    margin-top: 1;
+}
+
+#tools-buttons {
+    height: auto;
+    margin-top: 1;
+}
+
+#tools-buttons Button {
+    margin-right: 1;
 }
 
 #confirm-dialog {

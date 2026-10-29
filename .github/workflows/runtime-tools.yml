@@ -1,0 +1,50 @@
+name: Runtime tool downloads
+
+# Downloads the pinned yt-dlp, FFmpeg and Deno on each platform with the app's
+# own installer, then runs them. Catches dead URLs, wrong checksums and builds
+# that don't run (or lack libmp3lame) before a release ships with those pins.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * 1'  # weekly: upstream files can disappear
+  pull_request:
+    paths:
+      - 'src/youtube_bootlegger/core/tool_manifest.py'
+      - 'src/youtube_bootlegger/core/tool_installer.py'
+      - 'src/youtube_bootlegger/core/tools.py'
+      - 'src/youtube_bootlegger/core/settings.py'
+      - 'tests/test_runtime_tools.py'
+      - '.github/workflows/runtime-tools.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  tools:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v8.2.0
+        with:
+          python-version: '3.12'
+          enable-cache: true
+      - run: uv sync --locked --dev
+      - name: Install Linux Qt libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 libopengl0 libxcb-cursor0 libxkbcommon-x11-0 \
+            libxcb-xkb1 libxcb-xinerama0 libxcb-icccm4 libxcb-image0 \
+            libxcb-keysyms1 libxcb-render-util0 libxcb-shape0
+      - name: Download, verify and run the pinned tools
+        env:
+          RUNTIME_TOOLS_E2E: '1'
+          QT_QPA_PLATFORM: offscreen
+        run: uv run pytest tests/test_runtime_tools.py -v

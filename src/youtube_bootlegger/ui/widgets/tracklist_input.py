@@ -160,6 +160,7 @@ Final Song - 12:47"""
 
         input_container = QVBoxLayout()
         self._input = QPlainTextEdit()
+        self._input.setObjectName("tracklistArea")
         self._input.setPlaceholderText(self.PLACEHOLDER)
         self._input.setMinimumHeight(120)
         self._input.setSizePolicy(

@@ -15,6 +15,7 @@ from textual.widgets import Button, Footer, Header, Input, Label, Static, TextAr
 
 from ..app_logic import (
     AiButtonMode,
+    BannerAction,
     CancelReason,
     FormError,
     FormField,
@@ -47,6 +48,7 @@ from ..app_logic.track_finder import (
 from ..core import DEFAULT_TEMPLATE, DownloadSplitPipeline, preview_parse, validate_template
 from ..core.exceptions import YouTubeBootleggerError
 from ..core.settings import AppSettings, LlmProvider, get_settings
+from ..core.tool_installer import HttpGet, urlopen_get
 from ..core.video_info import VideoInfo, fetch_video_info
 from ..llm import (
     LlmExtractionError,
@@ -59,11 +61,12 @@ from ..llm import (
     launch_chatgpt_lite_assist,
 )
 from ..models import DownloadJob
-from ..utils import is_ffmpeg_available, is_valid_youtube_url
+from ..utils import is_valid_youtube_url
 from .external import fetch_thumbnail, open_url_in_browser
+from .runtime_tools import ToolsDownloader
 from .screens import ConfirmScreen, DirectoryPickerScreen, HelpScreen, SettingsScreen
 from .theme import BOOTLEGGER_THEME
-from .widgets import ProgressPanel, StatusLog, TrackPreviewTable, VideoPanel
+from .widgets import ProgressPanel, StatusLog, ToolsBannerBar, TrackPreviewTable, VideoPanel
 
 URL_DEBOUNCE_SECONDS = 0.5
 # On quit mid-job: how long to let a cancelled pipeline kill its child
@@ -118,6 +121,7 @@ class BootleggerApp(App[None]):
         settings: AppSettings | None = None,
         *,
         show_thumbnail: bool = True,
+        tools_http_get: HttpGet = urlopen_get,
     ) -> None:
         super().__init__()
         self._settings = settings or get_settings()
@@ -131,11 +135,19 @@ class BootleggerApp(App[None]):
         self._finder = TrackFinderSession()
         self._find_manual = False  # Whether the running search was a button click.
         self._find_row_state = ""
+        self._tools = ToolsDownloader(
+            self._settings,
+            http_get=tools_http_get,
+            run_in_background=self._in_background,
+            post=self._post,
+            on_change=self._refresh_tools_ui,
+        )
 
     # ── Layout ──────────────────────────────────────────────────────
 
     def compose(self) -> ComposeResult:
         yield Header()
+        yield ToolsBannerBar(id="tools-banner")
         with Horizontal(id="main"):
             with Vertical(id="form"):
                 yield Label("YouTube URL", classes="field-label")
@@ -192,13 +204,7 @@ class BootleggerApp(App[None]):
         self.theme = BOOTLEGGER_THEME.name
         self.query_one("#url", Input).focus()
         self._refresh_find_ui()
-        if not is_ffmpeg_available(self._settings.resolved_ffmpeg_command()):
-            self._log("FFmpeg not found — install it or set its path in Settings (F2).", "warn")
-            self._notify(
-                "FFmpeg not found. Set its path in Settings (F2).",
-                severity="warning",
-                timeout=8,
-            )
+        self._tools.auto_start()
 
     # ── Input handling ──────────────────────────────────────────────
 
@@ -369,6 +375,11 @@ class BootleggerApp(App[None]):
             self._set_field_error(result.field, result.message)
             self.query_one(f"#{FOCUS_TARGET_IDS[result.field]}").focus()
             self.bell()
+            return
+        blocked = self._tools.session.start_blocked_reason()
+        if blocked:
+            self._log(blocked, "warn")
+            self._notify(blocked, severity="warning", timeout=8)
             return
         self._run_pipeline(result)
 
@@ -619,6 +630,20 @@ class BootleggerApp(App[None]):
         template = self.query_one("#template", Input).value
         self.query_one("#template-ai-marker").display = self._finder.template_set_by_ai(template)
 
+    # ── Runtime tools ───────────────────────────────────────────────
+
+    def on_tools_banner_bar_action_pressed(self, event: ToolsBannerBar.ActionPressed) -> None:
+        if event.action == BannerAction.CANCEL:
+            self._tools.cancel()
+        elif event.action == BannerAction.DOWNLOAD:
+            self._tools.start()
+
+    def _refresh_tools_ui(self) -> None:
+        self.query_one(ToolsBannerBar).show(self._tools.session.banner())
+        for screen in self.screen_stack:
+            if isinstance(screen, SettingsScreen):
+                screen.refresh_tools()
+
     # ── Dialogs ─────────────────────────────────────────────────────
 
     def action_help(self) -> None:
@@ -636,9 +661,11 @@ class BootleggerApp(App[None]):
                 ):
                     self._last_fetched_url = ""
                     self._on_url_changed(url)
+                self._tools.auto_start()
             self._refresh_find_ui()
+            self._refresh_tools_ui()
 
-        self.push_screen(SettingsScreen(self._settings), on_close)
+        self.push_screen(SettingsScreen(self._settings, self._tools), on_close)
 
     def action_browse(self) -> None:
         output_input = self.query_one("#output-dir", Input)
@@ -651,6 +678,7 @@ class BootleggerApp(App[None]):
 
     async def action_quit(self) -> None:
         if not self.busy:
+            self._tools.cancel()
             self.exit()
             return
 
@@ -667,6 +695,7 @@ class BootleggerApp(App[None]):
                 await asyncio.to_thread(
                     self._pipeline_stopped.wait, QUIT_CLEANUP_TIMEOUT_SECONDS
                 )
+            self._tools.cancel()
             self.exit()
 
         self.push_screen(

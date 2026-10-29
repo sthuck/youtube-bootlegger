@@ -69,6 +69,7 @@ Item {
                     Behavior on color { ColorAnimation { duration: 150 } }
 
                     Rectangle {
+                        objectName: "externalYtdlpKnob"
                         width: 18; height: 18; radius: 9
                         color: "white"
                         anchors.verticalCenter: parent.verticalCenter
@@ -115,7 +116,8 @@ Item {
                             onEditingFinished: backend.setYtdlpPath(text)
                             Text {
                                 anchors.fill: parent; verticalAlignment: Text.AlignVCenter
-                                text: "Leave empty to use \"yt-dlp\" from PATH"
+                                objectName: "ytdlpPathPlaceholder"
+                                text: backend.tools.texts.ytdlpPlaceholder
                                 color: root.colors.textMuted; font.pixelSize: 12
                                 visible: !ytdlpPathField.text && !ytdlpPathField.activeFocus
                             }
@@ -160,7 +162,8 @@ Item {
                             onEditingFinished: backend.setFfmpegPath(text)
                             Text {
                                 anchors.fill: parent; verticalAlignment: Text.AlignVCenter
-                                text: "Leave empty to use \"ffmpeg\" from PATH"
+                                objectName: "ffmpegPathPlaceholder"
+                                text: backend.tools.texts.ffmpegPlaceholder
                                 color: root.colors.textMuted; font.pixelSize: 12
                                 visible: !ffmpegPathField.text && !ffmpegPathField.activeFocus
                             }
@@ -178,13 +181,58 @@ Item {
                         }
                     }
                 }
+            }
 
-                Text {
-                    objectName: "ffmpegMissingWarning"
-                    text: backend.ffmpegMissing ? "FFmpeg not found at this location" : ""
-                    color: root.colors.warning; font.pixelSize: 11
-                    visible: backend.ffmpegMissing
+            /* ── extra yt-dlp options ── */
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 4
+
+                Text { text: backend.tools.texts.extraArgsLabel; color: root.colors.textMuted; font.pixelSize: 12 }
+                Rectangle {
+                    Layout.fillWidth: true; height: 36
+                    color: root.colors.inputBg; radius: root.colors.radiusSm
+                    border.color: backend.ytdlpExtraArgsError ? root.colors.error
+                        : extraArgsField.activeFocus ? root.colors.borderFocus : root.colors.border
+                    border.width: extraArgsField.activeFocus ? 2 : 1
+                    Behavior on border.color { ColorAnimation { duration: 150 } }
+                    TextInput {
+                        id: extraArgsField
+                        objectName: "ytdlpExtraArgsField"
+                        anchors { fill: parent; leftMargin: 10; rightMargin: 10 }
+                        verticalAlignment: Text.AlignVCenter
+                        color: root.colors.text; font.pixelSize: 13; clip: true
+                        text: backend.ytdlpExtraArgs
+                        onEditingFinished: backend.setYtdlpExtraArgs(text)
+                        Text {
+                            anchors.fill: parent; verticalAlignment: Text.AlignVCenter
+                            text: backend.tools.texts.extraArgsPlaceholder
+                            color: root.colors.textMuted; font.pixelSize: 12
+                            visible: !extraArgsField.text && !extraArgsField.activeFocus
+                        }
+                    }
                 }
+                Text {
+                    objectName: "ytdlpExtraArgsError"
+                    Layout.fillWidth: true
+                    visible: text !== ""
+                    text: backend.ytdlpExtraArgsError
+                    color: root.colors.error; font.pixelSize: 11
+                    wrapMode: Text.Wrap
+                }
+                Text {
+                    Layout.fillWidth: true
+                    text: backend.tools.texts.extraArgsNote
+                    color: root.colors.textMuted; font.pixelSize: 11
+                    wrapMode: Text.Wrap
+                }
+            }
+
+            /* ── runtime tools: status, download, verify ── */
+            ToolsSettingsSection {
+                objectName: "toolsSettingsSection"
+                Layout.fillWidth: true
+                colors: root.colors
             }
 
             /* ── browser cookies (age-restricted videos) ── */
@@ -617,6 +665,7 @@ Item {
                 onClicked: {
                     ytdlpPathField.editingFinished()
                     ffmpegPathField.editingFinished()
+                    extraArgsField.editingFinished()
                     openaiKeyField.editingFinished()
                     openaiModelField.editingFinished()
                     anthropicKeyField.editingFinished()
@@ -626,7 +675,9 @@ Item {
                     compatibleUrlField.editingFinished()
                     compatibleTokenField.editingFinished()
                     compatibleModelField.editingFinished()
-                    root.open = false
+                    // Stay open on rejected yt-dlp options so the reason shows.
+                    if (backend.ytdlpExtraArgsError === "")
+                        root.open = false
                 }
             }
         }
