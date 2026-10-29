@@ -208,7 +208,7 @@ class AppSettings:
     def ytdlp_tool_cli_args(self) -> list[str]:
         """Explicit companion paths; argv lists preserve spaces on every OS."""
         options = self.ytdlp_tool_options()
-        args = []
+        args = ["--encoding", "utf-8"]
         if "ffmpeg_location" in options:
             args.extend(["--ffmpeg-location", options["ffmpeg_location"]])
         if "js_runtimes" in options:

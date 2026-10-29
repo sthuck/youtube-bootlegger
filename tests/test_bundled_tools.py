@@ -88,7 +88,7 @@ def test_missing_bundle_uses_path_and_library(tmp_path, monkeypatch):
     assert not settings.use_external_ytdlp
     assert settings.resolved_ffmpeg_command() == "ffmpeg"
     assert settings.resolved_ytdlp_command() == "yt-dlp"
-    assert settings.ytdlp_tool_cli_args() == []
+    assert settings.ytdlp_tool_cli_args() == ["--encoding", "utf-8"]
 
 
 def test_metadata_library_gets_companion_paths(installation, monkeypatch):

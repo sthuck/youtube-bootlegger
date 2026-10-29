@@ -37,6 +37,14 @@ jobs:
           python-version: '3.12'
           enable-cache: true
       - run: uv sync --locked --dev
+      - name: Install Linux native test dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            patchelf ccache libegl1 libopengl0 libxcb-cursor0 libxkbcommon-x11-0 \
+            libxcb-xkb1 libxcb-xinerama0 libxcb-icccm4 libxcb-image0 \
+            libxcb-keysyms1 libxcb-render-util0 libxcb-shape0
       - name: Download and verify native tools
         run: python scripts/bundle_tools.py --platform ${{ matrix.platform }} --destination "${{ runner.temp }}/Installed App/tools"
       - name: Verify discovery, encoding and JavaScript without PATH
