@@ -7,6 +7,8 @@ from typing import Any, Protocol
 
 from PySide6.QtCore import QSettings
 
+from .tools import bundled_tool, resolve_tool
+
 _ORG_NAME = "YouTubeBootlegger"
 _APP_NAME = "YouTubeBootlegger"
 
@@ -121,10 +123,10 @@ class AppSettings:
         use_external_ytdlp: When enabled, invoke the yt-dlp CLI binary via
             subprocess instead of the bundled yt-dlp Python library.
         ytdlp_path: Custom path to the yt-dlp executable. Only consulted
-            when use_external_ytdlp is enabled; falls back to "yt-dlp" on
-            PATH when left empty.
-        ffmpeg_path: Custom path to the ffmpeg executable. Falls back to
-            "ffmpeg" on PATH when left empty.
+            when use_external_ytdlp is enabled. When empty, prefer the bundled
+            executable, then "yt-dlp" on PATH.
+        ffmpeg_path: Custom path to FFmpeg. When empty, prefer the bundled
+            executable, then "ffmpeg" on PATH.
     """
 
     def __init__(self, backend: SettingsBackend | None = None):
@@ -137,7 +139,7 @@ class AppSettings:
 
     @property
     def use_external_ytdlp(self) -> bool:
-        return _to_bool(self._backend.value(_USE_EXTERNAL_KEY, False))
+        return _to_bool(self._backend.value(_USE_EXTERNAL_KEY, bundled_tool("yt-dlp") is not None))
 
     @use_external_ytdlp.setter
     def use_external_ytdlp(self, enabled: bool) -> None:
@@ -186,11 +188,32 @@ class AppSettings:
 
     def resolved_ytdlp_command(self) -> str:
         """Return the yt-dlp executable to invoke when running in external mode."""
-        return self.ytdlp_path or "yt-dlp"
+        return resolve_tool("yt-dlp", self.ytdlp_path)
 
     def resolved_ffmpeg_command(self) -> str:
         """Return the ffmpeg executable to invoke."""
-        return self.ffmpeg_path or "ffmpeg"
+        return resolve_tool("ffmpeg", self.ffmpeg_path)
+
+    def ytdlp_tool_options(self) -> dict[str, Any]:
+        """Explicit companion tool locations for the Python API."""
+        options: dict[str, Any] = {}
+        ffmpeg = self.resolved_ffmpeg_command()
+        if ffmpeg != "ffmpeg":
+            options["ffmpeg_location"] = ffmpeg
+        deno = bundled_tool("deno")
+        if deno:
+            options["js_runtimes"] = {"deno": {"path": str(deno)}}
+        return options
+
+    def ytdlp_tool_cli_args(self) -> list[str]:
+        """Explicit companion paths; argv lists preserve spaces on every OS."""
+        options = self.ytdlp_tool_options()
+        args = []
+        if "ffmpeg_location" in options:
+            args.extend(["--ffmpeg-location", options["ffmpeg_location"]])
+        if "js_runtimes" in options:
+            args.extend(["--js-runtimes", f"deno:{options['js_runtimes']['deno']['path']}"])
+        return args
 
     @property
     def llm_provider(self) -> LlmProvider:

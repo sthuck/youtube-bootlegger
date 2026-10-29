@@ -69,6 +69,7 @@ def _fetch_library(url: str, comment_limit: int, settings: AppSettings):
         "noplaylist": True,
         "skip_download": True,
         **settings.ytdlp_cookie_options(),
+        **settings.ytdlp_tool_options(),
     }
     if comment_limit:
         options.update({
@@ -109,11 +110,13 @@ def _run_external(url: str, settings: AppSettings, comment_limit: int):
     command = settings.resolved_ytdlp_command()
     cmd = [
         command,
+        "--ignore-config",
         "--dump-single-json",
         "--no-warnings",
         "--no-playlist",
         "--skip-download",
         *settings.ytdlp_cookie_cli_args(),
+        *settings.ytdlp_tool_cli_args(),
     ]
     timeout = METADATA_TIMEOUT_SECONDS
     if comment_limit:

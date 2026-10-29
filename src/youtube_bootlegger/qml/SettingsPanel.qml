@@ -115,7 +115,7 @@ Item {
                             onEditingFinished: backend.setYtdlpPath(text)
                             Text {
                                 anchors.fill: parent; verticalAlignment: Text.AlignVCenter
-                                text: "Leave empty to use \"yt-dlp\" from PATH"
+                                text: "Leave empty to use bundled yt-dlp, then PATH"
                                 color: root.colors.textMuted; font.pixelSize: 12
                                 visible: !ytdlpPathField.text && !ytdlpPathField.activeFocus
                             }
@@ -160,7 +160,7 @@ Item {
                             onEditingFinished: backend.setFfmpegPath(text)
                             Text {
                                 anchors.fill: parent; verticalAlignment: Text.AlignVCenter
-                                text: "Leave empty to use \"ffmpeg\" from PATH"
+                                text: "Leave empty to use bundled FFmpeg, then PATH"
                                 color: root.colors.textMuted; font.pixelSize: 12
                                 visible: !ffmpegPathField.text && !ffmpegPathField.activeFocus
                             }

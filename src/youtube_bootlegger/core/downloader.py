@@ -104,10 +104,8 @@ class AudioDownloader:
             "quiet": True,
             "logger": _DownloadLogger(self._log),
             **self._settings.ytdlp_cookie_options(),
+            **self._settings.ytdlp_tool_options(),
         }
-
-        if self._settings.ffmpeg_path:
-            ydl_opts["ffmpeg_location"] = self._settings.ffmpeg_path
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -191,6 +189,7 @@ class AudioDownloader:
 
         cmd = [
             command,
+            "--ignore-config",
             "-f", "bestaudio/best",
             "-x",
             "--audio-format", "mp3",
@@ -199,8 +198,7 @@ class AudioDownloader:
             "--newline",
         ]
 
-        if self._settings.ffmpeg_path:
-            cmd.extend(["--ffmpeg-location", self._settings.ffmpeg_path])
+        cmd.extend(self._settings.ytdlp_tool_cli_args())
 
         cmd.extend(self._settings.ytdlp_cookie_cli_args())
         cmd.append(url)

@@ -1,0 +1,56 @@
+name: Bundled runtime tools
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'scripts/bundle_tools.py'
+      - 'scripts/runtime-tools.json'
+      - 'scripts/check_nuitka_bundle.py'
+      - 'src/youtube_bootlegger/core/tools.py'
+      - 'src/youtube_bootlegger/core/settings.py'
+      - 'tests/test_bundled_tools.py'
+      - '.github/workflows/bundled-tools.yml'
+      - '.github/workflows/release.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  tools:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-x64
+          - os: windows-latest
+            platform: windows-x64
+          - os: macos-14
+            platform: macos-arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v8.2.0
+        with:
+          python-version: '3.12'
+          enable-cache: true
+      - run: uv sync --locked --dev
+      - name: Download and verify native tools
+        run: python scripts/bundle_tools.py --platform ${{ matrix.platform }} --destination "${{ runner.temp }}/Installed App/tools"
+      - name: Verify discovery, encoding and JavaScript without PATH
+        env:
+          BUNDLED_TOOLS_DIR: ${{ runner.temp }}/Installed App/tools
+          QT_QPA_PLATFORM: offscreen
+        run: uv run pytest tests/test_bundled_tools.py -v
+      - name: Verify actual Nuitka onefile discovery
+        if: runner.os != 'macOS'
+        run: uv run python scripts/check_nuitka_bundle.py --tools-dir "${{ runner.temp }}/Installed App/tools"
+      - name: Verify actual Nuitka macOS app discovery
+        if: runner.os == 'macOS'
+        run: uv run python scripts/check_nuitka_bundle.py --macos-app --tools-dir "${{ runner.temp }}/Installed App/tools"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: runtime-tools-${{ matrix.platform }}
+          path: ${{ runner.temp }}/Installed App/tools

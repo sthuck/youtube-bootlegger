@@ -91,13 +91,13 @@ class SettingsDialog(QDialog):
 
         self._ytdlp_path_input, ytdlp_row = self._make_path_row(
             "Select yt-dlp executable",
-            placeholder='Leave empty to use "yt-dlp" from PATH',
+            placeholder='Leave empty to use bundled yt-dlp, then PATH',
         )
         tools_form.addRow("yt-dlp path:", ytdlp_row)
 
         self._ffmpeg_path_input, ffmpeg_row = self._make_path_row(
             "Select ffmpeg executable",
-            placeholder='Leave empty to use "ffmpeg" from PATH',
+            placeholder='Leave empty to use bundled FFmpeg, then PATH',
         )
         tools_form.addRow("ffmpeg path:", ffmpeg_row)
 
