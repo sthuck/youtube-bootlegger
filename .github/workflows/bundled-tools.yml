@@ -7,6 +7,7 @@ on:
       - 'scripts/bundle_tools.py'
       - 'scripts/runtime-tools.json'
       - 'scripts/check_nuitka_bundle.py'
+      - 'scripts/prepare_windows_onefile.py'
       - 'src/youtube_bootlegger/core/tools.py'
       - 'src/youtube_bootlegger/core/settings.py'
       - 'tests/test_bundled_tools.py'

@@ -51,6 +51,12 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
+      - name: Prepare Windows onefile payload
+        if: runner.os == 'Windows'
+        run: |
+          python scripts/bundle_tools.py --platform windows-x64 --destination "${{ runner.temp }}/runtime-tools"
+          python scripts/prepare_windows_onefile.py --tools-dir "${{ runner.temp }}/runtime-tools" --config-file "${{ runner.temp }}/runtime-tools.nuitka-package.config.yml"
+
       - name: Build executable with pyside6-deploy
         run: uv run pyside6-deploy main.py --force -v
 
@@ -82,10 +88,10 @@ jobs:
             Write-Host "Staged executable from $exe"
           }
 
-      # Native sidecars are staged AFTER Nuitka, outside its Python import graph
-      # and (on Windows/Linux) outside the onefile payload.
-      - name: Bundle runtime executables (Linux and Windows)
-        if: runner.os != 'macOS'
+      # Linux sidecars and macOS Resources are staged after compilation. Windows
+      # tools were declared as executable dependencies inside its onefile payload.
+      - name: Bundle runtime executables (Linux)
+        if: runner.os == 'Linux'
         run: python scripts/bundle_tools.py --platform ${{ matrix.platform }} --destination tools
 
       - name: Bundle runtime executables (macOS)
@@ -109,8 +115,8 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $asset = "youtube-bootlegger-${{ github.event.release.tag_name }}-windows-x64.zip"
-          Compress-Archive -Path YouTubeBootlegger.exe, tools -DestinationPath $asset
+          $asset = "youtube-bootlegger-${{ github.event.release.tag_name }}-windows-x64.exe"
+          Copy-Item YouTubeBootlegger.exe $asset
           Add-Content -Path $env:GITHUB_ENV -Value "ASSET_PATH=$asset"
 
       - name: Package artifact (macOS)

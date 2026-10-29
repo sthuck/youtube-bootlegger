@@ -1,8 +1,10 @@
 """Release executable discovery and companion-path integration."""
 
 import io
+import configparser
 import json
 import os
+import shlex
 import subprocess
 import sys
 import zipfile
@@ -12,6 +14,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from scripts.bundle_tools import extract_asset, verify
+from scripts.prepare_windows_onefile import prepare
 from src.youtube_bootlegger.core import tools, ytdlp_metadata
 from src.youtube_bootlegger.core.downloader import AudioDownloader
 from src.youtube_bootlegger.core.settings import AppSettings
@@ -89,6 +92,41 @@ def test_missing_bundle_uses_path_and_library(tmp_path, monkeypatch):
     assert settings.resolved_ffmpeg_command() == "ffmpeg"
     assert settings.resolved_ytdlp_command() == "yt-dlp"
     assert settings.ytdlp_tool_cli_args() == ["--encoding", "utf-8"]
+
+
+def test_windows_compiled_app_uses_extracted_tools(installation, tmp_path, monkeypatch):
+    extracted = tmp_path / "Nuitka Extraction"
+    directory = extracted / "tools"
+    directory.mkdir(parents=True)
+    deno = directory / "deno.exe"
+    deno.touch(mode=0o755)
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(tools, "__compiled__", object(), raising=False)
+    monkeypatch.setattr(sys.modules["__main__"], "__file__", str(extracted / "main.py"))
+    assert tools.bundled_tools_dir() == directory
+    assert tools.bundled_tool("deno") == deno
+
+
+def test_windows_payload_keeps_native_executables_and_notices(tmp_path):
+    directory = tmp_path / "Inputs With Spaces"
+    directory.mkdir()
+    for name in ("yt-dlp.exe", "ffmpeg.exe", "ffprobe.exe", "deno.exe", "manifest.json", "README.md"):
+        (directory / name).touch()
+    (directory / "licenses").mkdir()
+    spec = tmp_path / "pysidedeploy.spec"
+    spec.write_text("[nuitka]\nextra_args = --quiet\nmode = onefile\n")
+    config_file = tmp_path / "tools.nuitka-package.config.yml"
+    prepare(directory, config_file, spec)
+    parsed = configparser.ConfigParser()
+    parsed.read(spec)
+    args = shlex.split(parsed["nuitka"]["extra_args"])
+    assert args[0] == "--quiet"
+    assert f"--include-data-dir={directory / 'licenses'}=tools/licenses" in args
+    config = json.loads(config_file.read_text())[0]
+    native = config["dlls"][0]
+    assert native["from_filenames"]["executable"] == "yes"
+    assert native["from_filenames"]["relative_path"] == str(directory)
+    assert native["dest_path"] == "tools"
 
 
 def test_metadata_library_gets_companion_paths(installation, monkeypatch):

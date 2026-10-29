@@ -1,28 +1,39 @@
 # Bundled runtime tools
 
-Release archives contain yt-dlp, FFmpeg, ffprobe and Deno. No separate installer,
+Release downloads contain yt-dlp, FFmpeg, ffprobe and Deno. No separate installer,
 system Python, Homebrew, administrator access, or PATH changes are needed to use
-the bundled tools. Extract the whole archive, keeping its directory structure.
-On macOS, drag the whole `.app` to Applications. Source checkouts still use the
+the bundled tools. On Windows, download the single `.exe` and launch it directly.
+On Linux, extract the whole archive, keeping its directory structure. On macOS,
+extract the ZIP and drag the whole `.app` to Applications. Source checkouts still use the
 Python yt-dlp library and system tools unless configured otherwise.
 
 ## Layout and Nuitka
 
-Linux x64 and Windows x64 keep `tools/` beside `YouTubeBootlegger.bin` or
-`YouTubeBootlegger.exe`. macOS ARM64 keeps it at
+Windows x64 ships a single `.exe`. Nuitka unpacks the app and `tools/` into a
+unique temporary directory on launch, runs the app, and removes that directory
+when it exits. There is no installation wizard and nothing to keep beside the
+EXE. The executable can be moved or renamed. Tools are extracted on each launch;
+this trades extra startup work and temporary disk space for a single-file download.
+
+Linux x64 keeps `tools/` beside `YouTubeBootlegger.bin`. macOS ARM64 keeps it at
 `YouTubeBootlegger.app/Contents/Resources/tools/`.
 The tools directory includes `yt-dlp`, `ffmpeg`, `ffprobe`, and `deno` (`.exe` on
 Windows), license notices and a manifest of the download URLs and checksums.
 
-The release workflow builds the GUI with pyside6-deploy/Nuitka first, then runs
-`scripts/bundle_tools.py` to download and verify native tools. They are independent
-processes, not Python modules to compile or files to extract from Nuitka's onefile
-payload on every launch. This retains the existing onefile GUI on Linux/Windows;
-the distributable is now an archive containing several files. A future MSI/DMG/
-Linux package can install exactly the same layout without changing tool lookup.
+For Windows, the release workflow downloads tools outside the project tree before
+compilation. `scripts/prepare_windows_onefile.py` declares them using Nuitka's
+executable dependency configuration (`executable: yes`), and includes their notices
+as data. They are native programs copied into the payload, not Python modules to
+compile. This avoids treating `.exe` files as ordinary data, which Nuitka excludes.
+The workflow then publishes the resulting single executable directly, without ZIP.
 
-Lookup uses the original executable path (`sys.argv[0]`, as documented for Nuitka
-onefile), never the current working directory or temporary extraction path.
+Linux and macOS stage tools after the GUI is compiled. Their distributions remain
+a `.tar.gz` with sidecars and a ZIP containing an `.app`, respectively.
+
+Compiled Windows lookup uses `__main__.__file__`, which Nuitka places inside its
+extraction directory. Linux sidecars and macOS Resources use the original
+executable path (`sys.argv[0]`). Source checkouts retain sidecar/PATH lookup. No
+layout depends on the current working directory.
 The macOS bundle seal is refreshed after staging tools. Deno's original signature
 and JIT entitlements are preserved. Ad-hoc signing is not Apple notarization;
 the project still needs Developer ID signing/notarization for a trusted macOS
@@ -71,8 +82,10 @@ not self-update these managed binaries at runtime.
 The download script runs each tool, checks Deno can execute JavaScript, records
 FFmpeg's build license, and checks yt-dlp accepts the explicit companion paths. The
 native CI matrix also tests FFmpeg conversion, ffprobe and app lookup from an
-unrelated working directory. A compiled Nuitka probe also verifies executable discovery in onefile mode and
-in a macOS app bundle. These checks are offline and do not guarantee that
+unrelated working directory. A compiled Nuitka probe also verifies executable discovery in Linux onefile mode
+and a macOS app bundle. On Windows it embeds the actual tools, copies only the EXE
+to a fresh directory, launches it twice with PATH empty, and verifies extraction
+cleanup after each exit. These checks are offline and do not guarantee that
 YouTube will accept a particular video/account/network.
 
 ## Third-party licenses and source distribution

@@ -1,7 +1,7 @@
 """Download pinned runtime tools into a release's tools directory.
 
-Uses only the standard library; run *after* Nuitka so it cannot sweep these
-executables into project data. Never extracts arbitrary archive paths or links.
+Uses only the standard library. Stage outside the project before Nuitka for the
+Windows payload, or after Nuitka for sidecars. Never extracts arbitrary paths.
 """
 
 import argparse

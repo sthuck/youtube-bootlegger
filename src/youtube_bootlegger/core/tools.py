@@ -1,8 +1,8 @@
-"""Locate release sidecar executables without relying on the working directory.
+"""Locate release executables without relying on the working directory.
 
 Nuitka onefile keeps sys.argv[0] pointing at the original executable, whereas
-__file__ points into its temporary extraction directory. Tools intentionally
-live outside that temporary directory and are never compiled as Python modules.
+__file__ of __main__ points into its temporary extraction directory. Windows
+embeds tools there; Linux uses sidecars and macOS keeps tools inside the .app.
 """
 
 import os
@@ -11,7 +11,11 @@ from pathlib import Path
 
 
 def bundled_tools_dir() -> Path:
-    """Return tools beside the executable, or inside a macOS app's Resources."""
+    """Return extracted Windows tools, Linux sidecars, or macOS Resources."""
+    if sys.platform == "win32" and "__compiled__" in globals():
+        main_file = getattr(sys.modules.get("__main__"), "__file__", None)
+        if main_file:
+            return Path(main_file).resolve().parent / "tools"
     executable_dir = Path(sys.argv[0]).resolve().parent
     if executable_dir.name == "MacOS" and executable_dir.parent.name == "Contents":
         return executable_dir.parent / "Resources" / "tools"
