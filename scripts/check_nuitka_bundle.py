@@ -27,7 +27,7 @@ if __name__ == "__main__":
         args = [sys.executable, "-m", "nuitka", "--assume-yes-for-downloads",
                 "--output-dir=" + str(root / "output")]
         if macos_app:
-            args.extend(["--mode=standalone", "--macos-create-app-bundle"])
+            args.append("--mode=app")
         else:
             args.append("--mode=onefile")
         subprocess.run([*args, str(probe)], check=True)
