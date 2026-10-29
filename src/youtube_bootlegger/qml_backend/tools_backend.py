@@ -1,25 +1,22 @@
 """QML bridge for the runtime-tools downloader (yt-dlp, FFmpeg, Deno).
 
-All decisions and strings come from app_logic.runtime_tools; this object only
-runs ToolsDownloadWorker on the thread pool, feeds its signals to the session
-and republishes the session's state as Qt properties.
+All decisions and strings come from app_logic.runtime_tools and downloads run
+through the shared ToolsDownloadRunner; this object only republishes the
+session's state as Qt properties.
 """
 
-from PySide6.QtCore import Property, QObject, QThreadPool, QUrl, Signal, Slot
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import Property, QObject, QThreadPool, Signal, Slot
 
 from ..app_logic import (
     FFMPEG_PATH_PLACEHOLDER,
     TOOLS_SECTION_TITLE,
     YTDLP_PATH_PLACEHOLDER,
     BannerAction,
-    RuntimeToolsSession,
     status_text,
 )
-from ..core.cancellation import CancelToken
 from ..core.settings import AppSettings
 from ..core.tool_installer import HttpGet, urlopen_get
-from ..workers import ToolsDownloadWorker
+from ..workers.tools_download_runner import ToolsDownloadRunner
 
 TOOLS_TEXTS = {
     "sectionTitle": TOOLS_SECTION_TITLE,
@@ -46,13 +43,9 @@ class ToolsBackend(QObject):
     ):
         super().__init__(parent)
         self._settings = settings
-        self._thread_pool = thread_pool
-        self._http_get = http_get
-        self._session = RuntimeToolsSession(settings)
-        # Every running worker is held until it reports back: its signals
-        # object must outlive the thread emitting on it.
-        self._workers: set[ToolsDownloadWorker] = set()
-        self._cancel: CancelToken | None = None
+        self._runner = ToolsDownloadRunner(settings, thread_pool, http_get=http_get, parent=self)
+        self._session = self._runner.session
+        self._runner.changed.connect(self._refresh)
         self._state: dict = {}
         self._refresh()
 
@@ -85,76 +78,30 @@ class ToolsBackend(QObject):
     @Slot()
     def checkAutoDownload(self):
         """At start-up and after a tool setting changed: download what's missing."""
-        self._run(self._session.auto_download_ids())
+        self._runner.auto_download()
 
     @Slot()
     def triggerBannerAction(self):
-        action = self._session.banner().action
-        if action == BannerAction.CANCEL:
-            self._cancel_download()
-        elif action == BannerAction.DOWNLOAD:
-            self._run(self._session.start())
+        self._runner.trigger_banner_action()
 
     @Slot()
     def downloadMissing(self):
-        self._run(self._session.start())
+        self._runner.download()
 
     @Slot()
     def verify(self):
-        self._run(self._session.start(verify=True), verify=True)
+        self._runner.download(verify=True)
 
     @Slot()
     def openFolder(self):
-        tools_dir = self._settings.tools_dir
-        if tools_dir is None:
-            return
-        try:
-            tools_dir.mkdir(parents=True, exist_ok=True)
-        except OSError:
-            pass  # Let the file manager report a folder it can't open.
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(tools_dir)))
+        self._runner.open_folder()
 
     @Slot()
     def shutdown(self):
         """The window is closing: stop a running download."""
-        self._cancel_download()
+        self._runner.cancel()
 
     # ── Internals ──────────────────────────────────────────────────
-
-    def _cancel_download(self):
-        if self._cancel is not None:
-            self._cancel.cancel()
-
-    def _run(self, tool_ids: list[str], *, verify: bool = False):
-        if not tool_ids:
-            self._refresh()
-            return
-        cancel = CancelToken()
-        worker = ToolsDownloadWorker(
-            tool_ids, self._settings, cancel, verify=verify, http_get=self._http_get
-        )
-        self._workers.add(worker)
-        self._cancel = cancel
-
-        def ended(handler):
-            def on_end(*args):
-                self._workers.discard(worker)
-                if self._cancel is cancel:
-                    self._cancel = None
-                handler(*args)
-                self._refresh()
-            return on_end
-
-        def on_progress(progress):
-            self._session.on_progress(progress)
-            self._refresh()
-
-        worker.signals.progress.connect(on_progress)
-        worker.signals.finished.connect(ended(self._session.on_finished))
-        worker.signals.cancelled.connect(ended(self._session.on_cancelled))
-        worker.signals.error.connect(ended(self._session.on_failed))
-        self._thread_pool.start(worker)
-        self._refresh()
 
     def _refresh(self):
         view = self._session.view()  # one tool lookup per refresh

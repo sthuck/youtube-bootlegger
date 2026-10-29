@@ -5,6 +5,7 @@ with their SHA-256. Bumping a version means updating url, sha256 and size here;
 the app then downloads only the tools whose pins changed.
 """
 
+import functools
 import hashlib
 import platform
 import sys
@@ -131,6 +132,7 @@ _ASSETS: dict[str, dict[str, tuple[ToolAsset, ...]]] = {
 TOOL_IDS: tuple[str, ...] = ("yt-dlp", "ffmpeg", "deno")
 
 
+@functools.cache
 def current_platform() -> str | None:
     """Return this machine's manifest key, or None if no downloads exist for it."""
     machine = platform.machine().lower()
@@ -144,8 +146,15 @@ def current_platform() -> str | None:
 
 
 def tool_specs(platform_key: str | None = None) -> dict[str, ToolSpec]:
-    """Return the pinned tools for a platform (default: this one), keyed by tool id."""
-    key = platform_key or current_platform()
+    """Return the pinned tools for a platform (default: this one), keyed by tool id.
+
+    Built once per platform; treat the result as read-only.
+    """
+    return _tool_specs(platform_key or current_platform())
+
+
+@functools.cache
+def _tool_specs(key: str | None) -> dict[str, ToolSpec]:
     assets = _ASSETS.get(key or "", {})
     return {
         tool_id: ToolSpec(

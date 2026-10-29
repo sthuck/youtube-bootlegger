@@ -23,6 +23,7 @@ from .tool_manifest import TOOL_LABELS, ToolSpec, tool_specs
 MARKER_NAME = "installed.json"
 DENO_CHECK_NAME = ".deno-on-path.json"
 MIN_DENO_MAJOR = 2
+FFPROBE_MISSING = "ffmpeg is on PATH but ffprobe isn't; yt-dlp needs both"
 
 
 def exe_name(name: str) -> str:
@@ -124,6 +125,7 @@ class ToolStatus:
         path: The executable in use, or None when missing.
         needs_download: True if the downloader should fetch it.
         downloadable: True if this platform has a pinned download.
+        detail: Why a tool found on PATH can't be used, if that's the case.
     """
 
     tool_id: str
@@ -132,6 +134,7 @@ class ToolStatus:
     path: str | None
     needs_download: bool
     downloadable: bool
+    detail: str = ""
 
 
 def tool_status(
@@ -157,7 +160,10 @@ def tool_status(
         return ToolStatus(
             tool_id, label, ToolSource.SYSTEM, system, downloadable and not use_path, downloadable
         )
-    return ToolStatus(tool_id, label, ToolSource.MISSING, None, downloadable, downloadable)
+    detail = ""
+    if tool_id == "ffmpeg" and shutil.which("ffmpeg"):
+        detail = FFPROBE_MISSING
+    return ToolStatus(tool_id, label, ToolSource.MISSING, None, downloadable, downloadable, detail)
 
 
 def _on_path(tool_id: str, cache_dir: Path | None) -> str | None:

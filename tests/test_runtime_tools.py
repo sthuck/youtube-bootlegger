@@ -203,6 +203,18 @@ def test_verify_replaces_a_tampered_tool(server, tools_dir):
     assert len(server.requests) == 1
 
 
+def test_cancel_before_verify_leaves_tools_alone(server, tools_dir):
+    install_fake_tools(tools_dir, server, ["ffmpeg"])
+    store = ToolStore(tools_dir, server.specs)
+    store.executable("ffprobe").write_bytes(b"tampered")
+    cancel = CancelToken()
+    cancel.cancel()
+    with pytest.raises(OperationCancelledError):
+        install_tools(["ffmpeg"], store, verify=True, http_get=server.http_get, cancel=cancel)
+    assert store.executable("ffprobe").read_bytes() == b"tampered"  # not re-hashed or removed
+    assert server.requests == []
+
+
 def _zip(tmp_path, entries) -> Path:
     archive = tmp_path / "bundle.zip"
     with zipfile.ZipFile(archive, "w") as z:
@@ -265,6 +277,10 @@ def test_manifest_pins_every_tool(platform_key):
             assert asset.url.startswith("https://")
             assert re.fullmatch(r"[0-9a-f]{64}", asset.sha256)
             assert asset.size > 0 and asset.archive in ("raw", "zip")
+
+
+def test_pinned_list_is_built_once():
+    assert tool_manifest.tool_specs() is tool_manifest.tool_specs()
 
 
 def test_unsupported_platform_has_no_downloads():
@@ -334,6 +350,13 @@ def test_deno_version_is_checked_once_per_binary(server, tools_dir, monkeypatch,
     run.return_value = subprocess.CompletedProcess([], 0, "deno 1.40.0\n", "")
     assert _status(settings_with(tools_dir), "deno").needs_download
     assert run.call_count == 2
+
+
+def test_ffmpeg_without_ffprobe_says_why(monkeypatch):
+    fake_path(monkeypatch, {"ffmpeg"})
+    status = _status(AppSettings(DictBackend()), "ffmpeg")
+    assert status.source == ToolSource.MISSING
+    assert status.detail == "ffmpeg is on PATH but ffprobe isn't; yt-dlp needs both"
 
 
 def test_downloaded_tools_win_over_path_and_custom_paths_win_over_both(server, tools_dir, monkeypatch):

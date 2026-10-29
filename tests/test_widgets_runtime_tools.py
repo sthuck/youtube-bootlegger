@@ -410,6 +410,30 @@ def test_saving_settings_mid_download_keeps_the_downloaded_ytdlp_default(
     assert AppSettings(store, tools_dir=tools_dir).use_external_ytdlp is True
 
 
+def test_open_folder_survives_a_folder_that_cannot_be_created(
+    open_main_window, server, tools_dir, monkeypatch
+):
+    """The tools path is taken by a file: clicking Open folder must not raise."""
+    import sys
+    from src.youtube_bootlegger.workers import tools_download_runner
+
+    fake_path(monkeypatch, {"ffmpeg", "ffprobe", "deno", "yt-dlp"})
+    tools_dir.parent.mkdir(parents=True, exist_ok=True)
+    tools_dir.write_text("not a folder")
+    server.error = urllib.error.URLError("offline")  # nothing can be installed there anyway
+    opened, raised = [], []
+    monkeypatch.setattr(
+        tools_download_runner.QDesktopServices, "openUrl", lambda url: opened.append(url) or True
+    )
+    monkeypatch.setattr(sys, "excepthook", lambda *exc: raised.append(exc))
+    window = open_main_window()
+
+    in_settings(window, lambda dialog: click(child(dialog, QPushButton, "toolsOpenFolderButton")))
+
+    assert raised == []
+    assert opened == []
+
+
 def test_open_folder_disabled_without_tools_dir(widgets_app, monkeypatch):
     fake_path(monkeypatch, {"ffmpeg", "ffprobe"})
     dialog = SettingsDialog(settings=AppSettings(DictBackend()))

@@ -75,6 +75,10 @@ def _join(labels: list[str]) -> str:
     return labels[0] if len(labels) == 1 else ", ".join(labels[:-1]) + " and " + labels[-1]
 
 
+def _ffprobe_hint(detail: str) -> str:
+    return f"FFmpeg can't be used: {detail}. Install ffprobe (it comes with FFmpeg)."
+
+
 def status_text(status: ToolStatus) -> str:
     """One line describing where a tool comes from, for the Settings list."""
     if status.source == ToolSource.CUSTOM:
@@ -87,6 +91,8 @@ def status_text(status: ToolStatus) -> str:
         return f"From PATH: {status.path}"
     if status.downloadable:
         return "Not downloaded yet"
+    if status.detail:
+        return f"Not usable: {status.detail}. Install ffprobe or set a path."
     return "Not found. No download exists for this platform; install it or set a path."
 
 
@@ -98,6 +104,9 @@ class RuntimeToolsSession:
         self._phase = ToolsPhase.IDLE
         self._progress: InstallProgress | None = None
         self._error = ""
+        # Looked up once per download: progress ticks re-render often, and
+        # nothing a lookup finds changes until the download ends.
+        self._download_statuses: list[ToolStatus] | None = None
 
     @property
     def phase(self) -> ToolsPhase:
@@ -108,6 +117,8 @@ class RuntimeToolsSession:
         return self._phase == ToolsPhase.DOWNLOADING
 
     def statuses(self) -> list[ToolStatus]:
+        if self.downloading and self._download_statuses is not None:
+            return self._download_statuses
         return self._settings.tool_statuses()
 
     def pending_ids(self) -> list[str]:
@@ -119,6 +130,10 @@ class RuntimeToolsSession:
         Empty while a download runs, or after the user cancelled or a
         download failed; the banner's button restarts those.
         """
+        if self.downloading:
+            # Called after Settings change: look the tools up again.
+            self._download_statuses = self._settings.tool_statuses()
+            return []
         if self._phase in (ToolsPhase.FAILED, ToolsPhase.CANCELLED) and not self.pending_ids():
             self._phase = ToolsPhase.IDLE  # The user provided the tools some other way.
         if self._phase != ToolsPhase.IDLE:
@@ -147,12 +162,14 @@ class RuntimeToolsSession:
         self._phase = ToolsPhase.DOWNLOADING
         self._progress = None
         self._error = ""
+        self._download_statuses = self._settings.tool_statuses()
         return ids
 
     def on_progress(self, progress: InstallProgress) -> None:
         self._progress = progress
 
     def on_finished(self) -> None:
+        self._download_statuses = None
         self._progress = None
         if self.pending_ids():
             self._phase = ToolsPhase.FAILED
@@ -161,11 +178,13 @@ class RuntimeToolsSession:
             self._phase = ToolsPhase.IDLE
 
     def on_failed(self, message: str) -> None:
+        self._download_statuses = None
         self._phase = ToolsPhase.FAILED
         self._progress = None
         self._error = message
 
     def on_cancelled(self) -> None:
+        self._download_statuses = None
         self._phase = ToolsPhase.CANCELLED
         self._progress = None
 
@@ -201,6 +220,9 @@ class RuntimeToolsSession:
             if s.source == ToolSource.MISSING and not s.downloadable
         ]
         if unavailable:
+            details = [s.detail for s in unavailable if s.detail]
+            if details:
+                return ToolsBanner(True, _ffprobe_hint(details[0]), is_error=True)
             names = _join([s.label for s in unavailable])
             return ToolsBanner(
                 True,
@@ -224,6 +246,9 @@ class RuntimeToolsSession:
             return f"Wait for {names} to finish downloading."
         if all(s.downloadable for s in missing):
             return f"{names} not downloaded yet. Use Download in the banner."
+        details = [s.detail for s in missing if s.detail and not s.downloadable]
+        if details:
+            return _ffprobe_hint(details[0])
         return f"{names} not found. Install it, or set its path in Settings."
 
     def _needed(self, statuses: list[ToolStatus]) -> list[ToolStatus]:

@@ -245,7 +245,8 @@ class AppSettings:
             args.extend(["--ffmpeg-location", options["ffmpeg_location"]])
         # Only the downloaded (pinned) yt-dlp is known to accept --js-runtimes.
         # A user-chosen or PATH copy may predate it (2025.11) and would reject
-        # it; those find Deno on PATH by themselves.
+        # it. Such a copy only finds a Deno on PATH, not the downloaded one:
+        # whoever brings their own yt-dlp manages its JS runtime too.
         downloaded_ytdlp = self.tool_store.executable("yt-dlp")
         runs_downloaded = (
             downloaded_ytdlp is not None and self.resolved_ytdlp_command() == str(downloaded_ytdlp)

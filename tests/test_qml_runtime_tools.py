@@ -14,7 +14,7 @@ from src.youtube_bootlegger.app_logic import FFMPEG_PATH_PLACEHOLDER, YTDLP_PATH
 from src.youtube_bootlegger.core.settings import AppSettings
 from src.youtube_bootlegger.core.tools import ToolStore
 from src.youtube_bootlegger.qml_backend import AppBackend
-from src.youtube_bootlegger.qml_backend import tools_backend as tools_backend_module
+from src.youtube_bootlegger.workers import tools_download_runner as tools_runner_module
 from tests.qml_support import (
     DictBackend,
     click_item,
@@ -328,7 +328,7 @@ class TestSettingsSection:
                 opened.append(url.toLocalFile())
                 return True
 
-        monkeypatch.setattr(tools_backend_module, "QDesktopServices", FakeDesktop)
+        monkeypatch.setattr(tools_runner_module, "QDesktopServices", FakeDesktop)
         with tools_window(store, tools_dir, server) as (window, _backend):
             open_settings(window)
             click_item(window, "toolsOpenFolderButton")

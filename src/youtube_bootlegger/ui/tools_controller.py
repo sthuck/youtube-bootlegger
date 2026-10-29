@@ -1,17 +1,15 @@
-"""Runs runtime-tool downloads for the widget UI and keeps the banner current."""
+"""Keeps the widget UI's tools banner in step with the shared download runner."""
 
 from PySide6.QtCore import QObject, QThreadPool, Signal
 
-from ..app_logic.runtime_tools import BannerAction, RuntimeToolsSession
-from ..core.cancellation import CancelToken
 from ..core.settings import AppSettings
-from ..core.tool_installer import HttpGet, InstallProgress, urlopen_get
-from ..workers import ToolsDownloadWorker
+from ..core.tool_installer import HttpGet, urlopen_get
+from ..workers.tools_download_runner import ToolsDownloadRunner
 from .widgets import ToolsBannerWidget
 
 
 class RuntimeToolsController(QObject):
-    """Wires a RuntimeToolsSession to ToolsDownloadWorker and the banner.
+    """Wires a ToolsDownloadRunner to the banner widget.
 
     Signals:
         changed: The session's state changed (progress, finish, failure...).
@@ -28,80 +26,36 @@ class RuntimeToolsController(QObject):
         parent: QObject | None = None,
     ):
         super().__init__(parent)
-        self._settings = settings
         self._banner = banner
-        self._http_get = http_get
-        self._session = RuntimeToolsSession(settings)
-        self._pool = QThreadPool(self)
-        self._pool.setMaxThreadCount(1)
-        # Held until the worker reports back, so its signals object stays alive.
-        self._worker: ToolsDownloadWorker | None = None
-        self._cancel: CancelToken | None = None
-        banner.action_requested.connect(self._on_banner_action)
+        pool = QThreadPool(self)
+        pool.setMaxThreadCount(1)
+        self._runner = ToolsDownloadRunner(settings, pool, http_get=http_get, parent=self)
+        self.session = self._runner.session
+        self._runner.changed.connect(self._refresh)
+        banner.action_requested.connect(lambda _action: self._runner.trigger_banner_action())
         self._refresh()
 
     @property
     def downloading(self) -> bool:
-        return self._session.downloading
+        return self._runner.downloading
 
     def start_blocked_reason(self) -> str | None:
-        return self._session.start_blocked_reason()
+        return self.session.start_blocked_reason()
 
     def auto_download(self) -> None:
         """Start-up / after Settings: download what's missing without asking."""
-        self._run(self._session.auto_download_ids())
+        self._runner.auto_download()
 
     def download(self, *, verify: bool = False) -> None:
         """Banner button or Settings: download missing tools (and re-check with verify)."""
-        self._run(self._session.start(verify=verify), verify=verify)
+        self._runner.download(verify=verify)
 
     def cancel(self) -> None:
-        if self._cancel is not None:
-            self._cancel.cancel()
+        self._runner.cancel()
 
-    def _run(self, tool_ids: list[str], *, verify: bool = False) -> None:
-        if tool_ids:
-            self._cancel = CancelToken()
-            worker = ToolsDownloadWorker(
-                tool_ids, self._settings, self._cancel, verify=verify, http_get=self._http_get
-            )
-            worker.signals.progress.connect(self._on_progress)
-            worker.signals.finished.connect(self._on_finished)
-            worker.signals.cancelled.connect(self._on_cancelled)
-            worker.signals.error.connect(self._on_error)
-            self._worker = worker
-            self._pool.start(worker)
-        self._refresh()
-
-    def _on_banner_action(self, action: str) -> None:
-        if action == BannerAction.CANCEL:
-            self.cancel()
-        elif action == BannerAction.DOWNLOAD:
-            self.download()
-
-    def _on_progress(self, progress: InstallProgress) -> None:
-        self._session.on_progress(progress)
-        self._refresh()
-
-    def _on_finished(self) -> None:
-        self._done()
-        self._session.on_finished()
-        self._refresh()
-
-    def _on_cancelled(self) -> None:
-        self._done()
-        self._session.on_cancelled()
-        self._refresh()
-
-    def _on_error(self, message: str) -> None:
-        self._done()
-        self._session.on_failed(message)
-        self._refresh()
-
-    def _done(self) -> None:
-        self._worker = None
-        self._cancel = None
+    def open_folder(self) -> None:
+        self._runner.open_folder()
 
     def _refresh(self) -> None:
-        self._banner.render(self._session.banner())
+        self._banner.render(self.session.banner())
         self.changed.emit()

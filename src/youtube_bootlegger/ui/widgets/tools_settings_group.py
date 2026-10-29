@@ -2,12 +2,12 @@
 
 from pathlib import Path
 
-from PySide6.QtCore import QUrl, Signal
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QFormLayout, QGroupBox, QHBoxLayout, QLabel, QPushButton
 
 from ...app_logic.runtime_tools import TOOLS_SECTION_TITLE, status_text
 from ...core.tools import ToolStatus
+from ...workers.tools_download_runner import open_tools_folder
 
 
 class ToolsSettingsGroup(QGroupBox):
@@ -65,6 +65,4 @@ class ToolsSettingsGroup(QGroupBox):
         self._open_button.setEnabled(tools_dir is not None)
 
     def _open_folder(self) -> None:
-        if self._tools_dir is not None:
-            self._tools_dir.mkdir(parents=True, exist_ok=True)
-            QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._tools_dir)))
+        open_tools_folder(self._tools_dir)

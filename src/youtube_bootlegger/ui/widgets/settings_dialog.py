@@ -38,6 +38,7 @@ from ...core.settings import (
     LlmProvider,
     get_settings,
 )
+from ...core.tools import ToolStatus
 from .tools_settings_group import ToolsSettingsGroup
 
 
@@ -66,11 +67,18 @@ class SettingsDialog(QDialog):
         self.refresh_tools()
         self._fit_to_screen()
 
-    def refresh_tools(self, downloading: bool = False) -> None:
-        """Re-read where each tool comes from; disable downloads while one runs."""
-        self._tools_group.refresh(
-            self._settings.tool_statuses(), self._settings.tools_dir, downloading
-        )
+    def refresh_tools(
+        self, downloading: bool = False, statuses: list[ToolStatus] | None = None
+    ) -> None:
+        """Show where each tool comes from; disable downloads while one runs.
+
+        Args:
+            statuses: The owner's current lookup (reused during a download);
+                looked up afresh when omitted.
+        """
+        if statuses is None:
+            statuses = self._settings.tool_statuses()
+        self._tools_group.refresh(statuses, self._settings.tools_dir, downloading)
 
     def _fit_to_screen(self) -> None:
         """Open at a comfortable height that never exceeds the screen.

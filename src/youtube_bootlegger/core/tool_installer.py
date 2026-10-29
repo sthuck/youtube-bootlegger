@@ -29,7 +29,9 @@ from .tools import MARKER_NAME, ToolStore, exe_name, file_sha256
 HttpGet = Callable[[str], AbstractContextManager[BinaryIO]]
 
 CHUNK_SIZE = 256 * 1024
-HTTP_TIMEOUT_SECONDS = 60
+# Also how long a cancel (or closing the app) can wait on a stalled connection:
+# cancel is checked between reads.
+HTTP_TIMEOUT_SECONDS = 15
 LOCK_POLL_MS = 250
 _STAGING_PREFIX = ".staging-"
 
@@ -89,6 +91,7 @@ def install_tools(
         specs = [store.specs[tool_id] for tool_id in tool_ids if tool_id in store.specs]
         if verify:
             for spec in specs:
+                cancel.raise_if_cancelled()
                 store.verify(spec.tool_id)
         # Another copy of the app may have finished these while we waited.
         pending = [spec for spec in specs if not store.is_installed(spec.tool_id)]

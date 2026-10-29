@@ -412,7 +412,9 @@ class MainWindow(QMainWindow):
     def _on_tools_changed(self) -> None:
         """Keep an open Settings dialog's tool list in step with downloads."""
         if self._settings_dialog is not None:
-            self._settings_dialog.refresh_tools(self._tools.downloading)
+            self._settings_dialog.refresh_tools(
+                self._tools.downloading, self._tools.session.statuses()
+            )
 
     def closeEvent(self, event) -> None:
         """Stop a running tool download when the window closes."""

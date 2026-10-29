@@ -163,6 +163,39 @@ def test_no_download_for_this_platform(monkeypatch):
     assert session.start_blocked_reason() == "FFmpeg not found. Install it, or set its path in Settings."
 
 
+def test_missing_ffprobe_is_named_where_nothing_can_be_downloaded(monkeypatch):
+    fake_path(monkeypatch, {"ffmpeg"})
+    session = RuntimeToolsSession(AppSettings(DictBackend()))
+    expected = (
+        "FFmpeg can't be used: ffmpeg is on PATH but ffprobe isn't; yt-dlp needs both. "
+        "Install ffprobe (it comes with FFmpeg)."
+    )
+    assert session.start_blocked_reason() == expected
+    assert session.banner().text == expected
+    ffmpeg = next(s for s in session.statuses() if s.tool_id == "ffmpeg")
+    assert status_text(ffmpeg).startswith("Not usable: ffmpeg is on PATH but ffprobe isn't")
+
+
+def test_statuses_are_looked_up_once_per_download(server, settings, monkeypatch):
+    fake_path(monkeypatch)
+    session = RuntimeToolsSession(settings)
+    calls = []
+    real = settings.tool_statuses
+    monkeypatch.setattr(settings, "tool_statuses", lambda: calls.append(1) or real())
+    session.auto_download_ids()
+    calls.clear()
+    for done in range(1, 50):
+        session.on_progress(InstallProgress("FFmpeg", done, 100))
+        session.view()
+    assert calls == []
+
+    session.auto_download_ids()  # Settings changed mid-download: look again
+    assert len(calls) == 1
+    session.on_finished()
+    session.view()
+    assert len(calls) > 1  # fresh after the download ends
+
+
 def test_status_lines(server, settings, monkeypatch):
     fake_path(monkeypatch, {"ffmpeg", "ffprobe", "yt-dlp"})
     by_id = {s.tool_id: status_text(s) for s in settings.tool_statuses()}
