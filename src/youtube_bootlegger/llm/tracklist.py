@@ -13,6 +13,7 @@ from .client import complete_structured, parse_structured
 from .config import endpoint_from_settings
 from .http import LlmError, PostJson, post_json
 from .prompt import SYSTEM_PROMPT, build_extraction_prompt
+from .request_log import with_request_log
 
 SCHEMA_NAME = "tracklist_extraction"
 
@@ -62,7 +63,7 @@ def extract_tracklist_metadata(
             user=build_extraction_prompt(video_title, raw_tracklist),
             output=TracklistExtraction,
             schema_name=SCHEMA_NAME,
-            http_post=http_post,
+            http_post=with_request_log(http_post, settings),
         )
     except LlmExtractionError:
         raise

@@ -10,8 +10,16 @@ from src.youtube_bootlegger.core.settings import AppSettings
 from src.youtube_bootlegger.qml_backend import AppBackend
 from src.youtube_bootlegger.qml_backend import backend as backend_module
 from src.youtube_bootlegger.workers import pipeline_worker as pipeline_worker_module
+from src.youtube_bootlegger.workers import tracklist_find_worker as find_worker_module
 from src.youtube_bootlegger.workers import video_info_worker as video_worker_module
-from tests.qml_support import DictBackend, FakePipeline, GatedFetch, make_video, open_window
+from tests.qml_support import (
+    DictBackend,
+    FakeFind,
+    FakePipeline,
+    GatedFetch,
+    make_video,
+    open_window,
+)
 
 
 @pytest.fixture(scope="session")
@@ -41,7 +49,7 @@ def ffmpeg_available(monkeypatch):
 def fake_video(monkeypatch, ffmpeg_available):
     calls = []
 
-    def fetch(url, settings=None):
+    def fetch(url, settings=None, comment_limit=0):
         calls.append((url, settings))
         return make_video()
 
@@ -58,6 +66,15 @@ def gated_fetch(monkeypatch, ffmpeg_available):
 
 
 @pytest.fixture
+def fake_find(monkeypatch):
+    """Replace the AI track-list finder; never makes a real AI request."""
+    find = FakeFind()
+    monkeypatch.setattr(find_worker_module, "find_tracklist", find)
+    yield find
+    find.release()
+
+
+@pytest.fixture
 def fake_pipeline(monkeypatch):
     FakePipeline.instances = []
     FakePipeline.outcome = [Path("/out/01 - Intro.mp3"), Path("/out/02 - Song.mp3")]
@@ -69,11 +86,11 @@ def fake_pipeline(monkeypatch):
 
 
 @pytest.fixture
-def qml_harness(qapp, app_settings, fake_video):
+def qml_harness(qapp, app_settings, fake_video, fake_find):
     """Main.qml + AppBackend; fails the test if any QML warning was emitted.
 
-    Network access is faked via fake_video; tests that request gated_fetch
-    after qml_harness replace it.
+    Network access is faked via fake_video and AI track-list finding via
+    fake_find; tests that request gated_fetch after qml_harness replace it.
     """
     backend = AppBackend(settings=app_settings)
     backend.URL_DEBOUNCE_MS = 10

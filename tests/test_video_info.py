@@ -1,12 +1,18 @@
-"""Unit tests for video info fetching helpers, including external yt-dlp mode."""
+"""Unit tests for video info helpers: metadata, track sources and thumbnails."""
+
+from unittest.mock import Mock
 
 import pytest
 
+import src.youtube_bootlegger.core.video_info as vi
 from src.youtube_bootlegger.core.exceptions import ValidationError
 from src.youtube_bootlegger.core.settings import AppSettings
 from src.youtube_bootlegger.core.video_info import (
+    VideoChapter,
+    VideoComment,
     _build_video_info,
-    _fetch_video_info_external,
+    parse_chapters,
+    parse_comments,
     resolve_thumbnail,
     thumbnail_candidates,
 )
@@ -26,13 +32,6 @@ class FakeSettingsBackend:
 
     def sync(self):
         pass
-
-
-def make_settings(ytdlp_path=""):
-    settings = AppSettings(FakeSettingsBackend())
-    settings.use_external_ytdlp = True
-    settings.ytdlp_path = ytdlp_path
-    return settings
 
 
 class TestBuildVideoInfo:
@@ -70,54 +69,82 @@ class TestBuildVideoInfo:
         assert video_info.title == "Unknown Title"
 
 
-class TestFetchVideoInfoExternal:
-    """Tests for _fetch_video_info_external using a fake yt-dlp executable."""
+class TestChaptersAndDescription:
+    """Tests for the track-list sources kept from the yt-dlp info dict."""
 
-    def test_missing_executable_raises_validation_error(self):
-        settings = make_settings(ytdlp_path="/nonexistent/yt-dlp")
+    def test_keeps_description_and_valid_chapters(self):
+        info = _build_video_info({
+            "description": "0:00 One\n1:05 Two",
+            "chapters": [
+                {"title": "One", "start_time": 0, "end_time": 65},
+                {"title": "Two", "start_time": 65.5, "end_time": 150},
+            ],
+        })
+        assert info.description == "0:00 One\n1:05 Two"
+        assert info.chapters == (VideoChapter("One", 0, 65), VideoChapter("Two", 65.5, 150))
 
-        with pytest.raises(ValidationError) as exc_info:
-            _fetch_video_info_external("https://youtu.be/abc", settings)
+    def test_missing_sources_are_empty(self):
+        info = _build_video_info({"description": None, "chapters": None})
+        assert info.description == ""
+        assert info.chapters == ()
 
-        assert "/nonexistent/yt-dlp" in str(exc_info.value)
+    def test_skips_unusable_chapters_without_changing_valid_names(self):
+        chapters = parse_chapters([
+            None, {}, {"title": "", "start_time": 0},
+            {"title": "Bad", "start_time": float("nan")},
+            {"title": "Bad", "start_time": -1},
+            {"title": "Bad", "start_time": True},
+            {"title": "Bad", "start_time": 10, "end_time": 5},
+            {"title": " 演奏 ", "start_time": 3600.5},
+        ])
+        assert chapters == (VideoChapter(" 演奏 ", 3600.5),)
 
-    def test_parses_json_output_from_fake_executable(self, tmp_path):
-        fake_ytdlp = tmp_path / "fake-yt-dlp.py"
-        fake_ytdlp.write_text(
-            "#!/usr/bin/env python3\n"
-            "import json\n"
-            "print(json.dumps({"
-            "'id': 'xyz', 'title': 'Fake Video', 'channel': 'Fake Channel', "
-            "'duration': 61, 'thumbnails': [], 'view_count': 42, "
-            "'upload_date': '20230101'}))\n"
+
+# Like counts intentionally differ from YouTube's order, which must be kept.
+COMMENTS = [
+    {"id": "a", "text": "0:00 One\n1:05 Two", "parent": "root", "like_count": 1},
+    {"id": "reply", "text": "A reply", "parent": "a"},
+    {"id": "blank", "text": "   ", "parent": "root"},
+    {"id": "b", "text": "Another list", "parent": "root", "like_count": 100},
+    {"id": "c", "text": "Third", "parent": "root"},
+]
+
+
+class TestComments:
+    """Comments are fetched in the same request as the rest of the info."""
+
+    @pytest.fixture
+    def fetch(self, monkeypatch):
+        fetch = Mock(return_value={"id": "", "comments": COMMENTS})
+        monkeypatch.setattr(vi, "fetch_info_dict", fetch)
+        monkeypatch.setattr(vi, "_url_exists", lambda url: False)
+        return fetch
+
+    def test_one_request_returns_top_level_comments_in_order(self, fetch):
+        settings = AppSettings(FakeSettingsBackend())
+        info = vi.fetch_video_info("https://youtu.be/x", settings, comment_limit=2)
+        assert info.comments == (
+            VideoComment("a", "0:00 One\n1:05 Two"), VideoComment("b", "Another list"),
         )
-        fake_ytdlp.chmod(0o755)
+        fetch.assert_called_once_with("https://youtu.be/x", settings, comment_limit=2)
 
-        settings = make_settings(ytdlp_path=str(fake_ytdlp))
+    def test_not_requested_by_default(self, fetch):
+        info = vi.fetch_video_info("https://youtu.be/x", AppSettings(FakeSettingsBackend()))
+        assert info.comments == ()
+        assert fetch.call_args.kwargs == {"comment_limit": 0}
 
-        video_info = _fetch_video_info_external("https://youtu.be/xyz", settings)
+    @pytest.mark.parametrize("limit", [-1, 2.5, "20", True, None])
+    def test_invalid_limit_rejected_before_fetch(self, fetch, limit):
+        with pytest.raises(ValidationError, match="nonnegative integer"):
+            vi.fetch_video_info("https://youtu.be/x", comment_limit=limit)
+        fetch.assert_not_called()
 
-        assert video_info.video_id == "xyz"
-        assert video_info.title == "Fake Video"
-        assert video_info.duration_string == "1:01"
-        assert video_info.view_count == 42
+    @pytest.mark.parametrize("raw", [None, [], [None, {}, {"text": 5}]])
+    def test_absent_or_unusable_comments(self, raw):
+        assert parse_comments(raw, 20) == ()
 
-    def test_nonzero_exit_raises_validation_error(self, tmp_path):
-        fake_ytdlp = tmp_path / "fake-yt-dlp-fail.py"
-        fake_ytdlp.write_text(
-            "#!/usr/bin/env python3\n"
-            "import sys\n"
-            "print('ERROR: Video unavailable', file=sys.stderr)\n"
-            "sys.exit(1)\n"
-        )
-        fake_ytdlp.chmod(0o755)
-
-        settings = make_settings(ytdlp_path=str(fake_ytdlp))
-
-        with pytest.raises(ValidationError) as exc_info:
-            _fetch_video_info_external("https://youtu.be/xyz", settings)
-
-        assert "unavailable" in str(exc_info.value).lower()
+    def test_comment_without_id_keeps_text(self):
+        assert parse_comments([{"text": "Set list"}], 20) == (VideoComment("", "Set list"),)
 
 
 ZOO_ID = "jNQXAC9IVRw"
@@ -189,13 +216,11 @@ class TestResolveThumbnail:
         assert resolve_thumbnail(info, url_exists=lambda url: False) == info
 
     def test_fetch_video_info_resolves_thumbnail(self, monkeypatch):
-        import src.youtube_bootlegger.core.video_info as vi
-
         settings = AppSettings(FakeSettingsBackend())
         monkeypatch.setattr(
             vi,
-            "_fetch_video_info_library",
-            lambda url: _build_video_info({"id": ZOO_ID, "thumbnails": yt_thumbnails(ZOO_ID)}),
+            "fetch_info_dict",
+            lambda url, settings, comment_limit: {"id": ZOO_ID, "thumbnails": yt_thumbnails(ZOO_ID)},
         )
         monkeypatch.setattr(vi, "_url_exists", lambda url: url.endswith("/hqdefault.jpg"))
         info = vi.fetch_video_info("https://youtu.be/" + ZOO_ID, settings)

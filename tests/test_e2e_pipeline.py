@@ -73,7 +73,7 @@ def test_qml_full_pipeline_splits_and_tags_real_mp3_files(
     monkeypatch.setattr(
         video_worker_module,
         "fetch_video_info",
-        lambda url, settings=None: make_video(
+        lambda url, settings=None, comment_limit=0: make_video(
             title="Acoustic Session",
             channel="The Bootleggers",
             duration=3,

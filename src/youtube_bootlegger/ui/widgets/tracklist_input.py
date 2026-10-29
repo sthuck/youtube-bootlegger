@@ -15,6 +15,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ...app_logic.track_finder import (
+    API_HINT_TEXT,
+    FIND_BUTTON_LABEL,
+    OPEN_SETTINGS_LABEL,
+    SEARCHING_TEXT,
+    STOP_BUTTON_LABEL,
+    TEMPLATE_SET_BY_AI_TEXT,
+    UNDO_BUTTON_LABEL,
+)
 from ...core import (
     DEFAULT_TEMPLATE,
     ParseError,
@@ -39,6 +48,11 @@ Final Song - 12:47"""
     template_changed = Signal(str)
     tracklist_changed = Signal()
     ai_requested = Signal()
+    stop_find_requested = Signal()
+    undo_find_requested = Signal()
+    find_banner_dismissed = Signal()
+    open_settings_requested = Signal()
+    api_hint_dismissed = Signal()
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -71,6 +85,13 @@ Final Song - 12:47"""
         template_header.addWidget(placeholders_label)
         template_header.addStretch()
 
+        self._template_ai_marker = QLabel(f"✨ {TEMPLATE_SET_BY_AI_TEXT}")
+        self._template_ai_marker.setStyleSheet(
+            f"color: {self._theme.primary}; font-size: 11px;"
+        )
+        self._template_ai_marker.hide()
+        template_header.addWidget(self._template_ai_marker)
+
         template_layout.addLayout(template_header)
 
         self._template_input = QLineEdit()
@@ -93,8 +114,11 @@ Final Song - 12:47"""
         tracklist_header.addWidget(tracklist_label)
         tracklist_header.addStretch()
 
-        self._ai_button = QPushButton("AI")
-        self._ai_button.setToolTip("Analyze track list with AI to infer template and metadata")
+        self._ai_button = QPushButton(FIND_BUTTON_LABEL)
+        self._ai_button.setToolTip(
+            "Empty track list: find one in the video with AI. "
+            "Filled track list: infer the template and metadata with AI."
+        )
         self._ai_button.setEnabled(False)
         self._ai_button.clicked.connect(self.ai_requested.emit)
         tracklist_header.addWidget(self._ai_button)
@@ -106,6 +130,30 @@ Final Song - 12:47"""
         tracklist_header.addWidget(self._ai_spinner)
 
         layout.addLayout(tracklist_header)
+
+        # Only one of these rows shows at a time (MainWindow decides which).
+        self._searching_row, self._searching_label = self._make_notice_row(
+            SEARCHING_TEXT, [(STOP_BUTTON_LABEL, self.stop_find_requested)]
+        )
+        layout.addWidget(self._searching_row)
+
+        self._banner_row, self._banner_label = self._make_notice_row(
+            "",
+            [
+                (UNDO_BUTTON_LABEL, self.undo_find_requested),
+                ("✕", self.find_banner_dismissed),
+            ],
+        )
+        layout.addWidget(self._banner_row)
+
+        self._hint_row, self._hint_label = self._make_notice_row(
+            f"ⓘ {API_HINT_TEXT}",
+            [
+                (OPEN_SETTINGS_LABEL, self.open_settings_requested),
+                ("✕", self.api_hint_dismissed),
+            ],
+        )
+        layout.addWidget(self._hint_row)
 
         input_preview_layout = QHBoxLayout()
         input_preview_layout.setSpacing(10)
@@ -183,6 +231,37 @@ Final Song - 12:47"""
         self._error_label.hide()
         layout.addWidget(self._error_label)
 
+    def _make_notice_row(
+        self, text: str, buttons: list[tuple[str, Signal]]
+    ) -> tuple[QFrame, QLabel]:
+        """Build a hidden row of wrapped text plus buttons that emit the given signals."""
+        row = QFrame()
+        row.setStyleSheet(f"""
+            QFrame {{
+                background-color: {self._theme.preview_bg};
+                border: 1px solid {self._theme.preview_border};
+                border-radius: 4px;
+            }}
+            QLabel {{ border: none; }}
+        """)
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(8, 4, 8, 4)
+
+        label = QLabel(text)
+        label.setWordWrap(True)
+        row_layout.addWidget(label, 1)
+
+        for button_text, signal in buttons:
+            button = QPushButton(button_text)
+            if button_text == "✕":
+                button.setFixedWidth(28)
+                button.setToolTip("Dismiss")
+            button.clicked.connect(signal.emit)
+            row_layout.addWidget(button)
+
+        row.hide()
+        return row, label
+
     def _connect_signals(self) -> None:
         self._template_input.textChanged.connect(self._on_template_changed)
         self._input.textChanged.connect(self._on_tracklist_changed)
@@ -218,6 +297,28 @@ Final Song - 12:47"""
 
     def _refresh_ai_state(self) -> None:
         self._ai_button.setEnabled(self._ai_available and not self._ai_loading)
+
+    def set_ai_button_label(self, label: str) -> None:
+        """Set the AI button's label (it follows the button's mode)."""
+        self._ai_button.setText(label)
+
+    def set_find_state(self, searching: bool, banner: str, show_hint: bool) -> None:
+        """Show at most one of the searching row, the AI banner and the API hint.
+
+        Priority: searching, then banner (non-empty text), then hint.
+        """
+        self._searching_row.setVisible(searching)
+        self._banner_label.setText(banner)
+        self._banner_row.setVisible(not searching and bool(banner))
+        self._hint_row.setVisible(not searching and not banner and show_hint)
+
+    def set_template_set_by_ai(self, visible: bool) -> None:
+        """Show or hide the "set by AI" marker next to the template field."""
+        self._template_ai_marker.setVisible(visible)
+
+    def set_text(self, text: str) -> None:
+        """Set the tracklist text programmatically."""
+        self._input.setPlainText(text)
 
     def set_template(self, template: str) -> None:
         """Set the template text programmatically."""

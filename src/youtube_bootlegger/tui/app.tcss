@@ -51,6 +51,28 @@
     height: auto;
 }
 
+/* One message row above the track list: searching, AI-filled banner, or hint. */
+#find-row {
+    height: auto;
+    background: $boost;
+    padding: 0 1;
+    display: none;
+}
+
+#find-row.-hint {
+    color: $text-muted;
+}
+
+#find-buttons {
+    height: auto;
+    align-horizontal: right;
+}
+
+#find-buttons Button {
+    margin-left: 1;
+    min-width: 6;
+}
+
 #preview-status {
     width: 1fr;
     content-align-horizontal: right;
@@ -82,6 +104,13 @@
 
 #metadata-row > Vertical:first-child {
     margin-right: 1;
+}
+
+#template-ai-marker {
+    width: auto;
+    color: $secondary;
+    margin: 1 0 0 1;
+    display: none;
 }
 
 #ai-assist,
@@ -217,9 +246,14 @@ ModalScreen {
     dock: bottom;
 }
 
+/* Fill what's left of the dialog (capped at 90% of the screen) so the
+   buttons below always stay visible; the body scrolls instead. */
+#settings-dialog {
+    height: 90%;
+}
+
 #settings-body {
-    height: auto;
-    max-height: 30;
+    height: 1fr;
 }
 
 #settings-dialog .field-error {

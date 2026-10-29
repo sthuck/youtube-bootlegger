@@ -1,20 +1,37 @@
 """Video information fetching using yt-dlp."""
 
-import json
-import subprocess
+import math
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from urllib.parse import urlparse
 
-import yt_dlp
-
 from .exceptions import ValidationError
 from .settings import AppSettings, get_settings
+from .ytdlp_metadata import fetch_info_dict
 
 # How many of the best-ranked thumbnails to consider before the fallback.
 MAX_THUMBNAIL_CANDIDATES = 4
 THUMBNAIL_PROBE_TIMEOUT_SECONDS = 5
+# Suggested comment_limit when looking for a set list in comments.
+DEFAULT_COMMENT_LIMIT = 20
+
+
+@dataclass(frozen=True)
+class VideoChapter:
+    """A named chapter, in seconds. end_seconds is None when yt-dlp omits it."""
+
+    title: str
+    start_seconds: float
+    end_seconds: float | None = None
+
+
+@dataclass(frozen=True)
+class VideoComment:
+    """A top-level comment's text, with yt-dlp's comment ID."""
+
+    comment_id: str
+    text: str
 
 
 @dataclass(frozen=True)
@@ -31,6 +48,10 @@ class VideoInfo:
         view_count: Number of views.
         upload_date: Upload date string (YYYYMMDD).
         thumbnail_candidates: Thumbnail URLs to try, best first.
+        description: Video description text.
+        chapters: Valid named chapters in video order. yt-dlp may derive these
+            from timestamps in the description, so they aren't always songs.
+        comments: Top-level comments in YouTube's Top order, when requested.
     """
 
     video_id: str
@@ -42,6 +63,9 @@ class VideoInfo:
     view_count: int | None = None
     upload_date: str | None = None
     thumbnail_candidates: tuple[str, ...] = ()
+    description: str = ""
+    chapters: tuple[VideoChapter, ...] = ()
+    comments: tuple[VideoComment, ...] = ()
 
     @property
     def formatted_views(self) -> str:
@@ -65,97 +89,35 @@ class VideoInfo:
         return f"{year}-{month}-{day}"
 
 
-def fetch_video_info(url: str, settings: AppSettings | None = None) -> VideoInfo:
+def fetch_video_info(
+    url: str,
+    settings: AppSettings | None = None,
+    *,
+    comment_limit: int = 0,
+) -> VideoInfo:
     """Fetch video information from YouTube URL.
 
     Args:
         url: YouTube video URL.
         settings: Application settings. Defaults to the shared singleton.
+        comment_limit: Also fetch up to this many top-level comments, in the
+            same request. Comments are skipped if they fail to load. YouTube's
+            ranking is dynamic, so repeated fetches may return different ones.
 
     Returns:
         VideoInfo object with video details.
 
     Raises:
-        ValidationError: If the URL is invalid or video unavailable.
+        ValidationError: If the URL is invalid, the video unavailable, or
+            comment_limit isn't a nonnegative integer.
     """
-    settings = settings or get_settings()
-    if settings.use_external_ytdlp:
-        info = _fetch_video_info_external(url, settings)
-    else:
-        info = _fetch_video_info_library(url)
-    return resolve_thumbnail(info)
+    if isinstance(comment_limit, bool) or not isinstance(comment_limit, int) or comment_limit < 0:
+        raise ValidationError("Comment limit must be a nonnegative integer")
+    info = fetch_info_dict(url, settings or get_settings(), comment_limit=comment_limit)
+    return resolve_thumbnail(_build_video_info(info, comment_limit))
 
 
-def _fetch_video_info_library(url: str) -> VideoInfo:
-    """Fetch video info using the bundled yt-dlp Python library."""
-    ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "extract_flat": False,
-        "skip_download": True,
-    }
-
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-
-            if info is None:
-                raise ValidationError("Could not fetch video information")
-
-            return _build_video_info(info)
-
-    except yt_dlp.utils.DownloadError as e:
-        error_msg = str(e).lower()
-        if "private" in error_msg:
-            raise ValidationError("This video is private") from e
-        if "unavailable" in error_msg or "not available" in error_msg:
-            raise ValidationError("This video is unavailable") from e
-        if "removed" in error_msg:
-            raise ValidationError("This video has been removed") from e
-        raise ValidationError(f"Could not fetch video: {e}") from e
-    except Exception as e:
-        raise ValidationError(f"Error fetching video info: {e}") from e
-
-
-def _fetch_video_info_external(url: str, settings: AppSettings) -> VideoInfo:
-    """Fetch video info by invoking the external yt-dlp executable."""
-    command = settings.resolved_ytdlp_command()
-    cmd = [command, "-j", "--no-warnings", "--skip-download", url]
-
-    try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-    except FileNotFoundError as e:
-        raise ValidationError(
-            f"yt-dlp executable not found: '{command}'. Check the yt-dlp path in Settings."
-        ) from e
-    except subprocess.TimeoutExpired as e:
-        raise ValidationError("Timed out fetching video information") from e
-
-    if result.returncode != 0:
-        error_msg = (result.stderr or result.stdout or "").strip()
-        lowered = error_msg.lower()
-        if "private" in lowered:
-            raise ValidationError("This video is private")
-        if "unavailable" in lowered or "not available" in lowered:
-            raise ValidationError("This video is unavailable")
-        if "removed" in lowered:
-            raise ValidationError("This video has been removed")
-        raise ValidationError(f"Could not fetch video: {error_msg or 'unknown error'}")
-
-    try:
-        info = json.loads(result.stdout.splitlines()[0])
-    except (json.JSONDecodeError, IndexError) as e:
-        raise ValidationError("Could not parse yt-dlp output") from e
-
-    return _build_video_info(info)
-
-
-def _build_video_info(info: dict) -> VideoInfo:
+def _build_video_info(info: dict, comment_limit: int = 0) -> VideoInfo:
     """Build a VideoInfo from a yt-dlp info dict (Python API or CLI JSON)."""
     duration = info.get("duration", 0) or 0
     duration_string = _format_duration(duration)
@@ -173,7 +135,49 @@ def _build_video_info(info: dict) -> VideoInfo:
         view_count=info.get("view_count"),
         upload_date=info.get("upload_date"),
         thumbnail_candidates=tuple(candidates),
+        description=info.get("description") or "",
+        chapters=parse_chapters(info.get("chapters")),
+        comments=parse_comments(info.get("comments"), comment_limit),
     )
+
+
+def _seconds(value) -> float | None:
+    """Return value as finite, nonnegative seconds, or None."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if math.isfinite(value) and value >= 0:
+            return float(value)
+    return None
+
+
+def parse_chapters(chapters) -> tuple[VideoChapter, ...]:
+    """Keep yt-dlp chapters that have a name and a valid time range."""
+    result = []
+    for chapter in chapters or []:
+        if not isinstance(chapter, dict):
+            continue
+        title = chapter.get("title")
+        start = _seconds(chapter.get("start_time"))
+        end = _seconds(chapter.get("end_time"))
+        if not isinstance(title, str) or not title.strip() or start is None:
+            continue
+        if end is not None and end <= start:
+            continue
+        result.append(VideoChapter(title, start, end))
+    return tuple(result)
+
+
+def parse_comments(comments, limit: int) -> tuple[VideoComment, ...]:
+    """Keep up to `limit` nonblank top-level comments, in their given order."""
+    result = []
+    for comment in comments or []:
+        if len(result) >= limit:
+            break
+        if not isinstance(comment, dict) or comment.get("parent") not in (None, "root"):
+            continue
+        text = comment.get("text")
+        if isinstance(text, str) and text.strip():
+            result.append(VideoComment(str(comment.get("id") or ""), text))
+    return tuple(result)
 
 
 def _format_duration(seconds: int) -> str:

@@ -4,6 +4,7 @@ from .signals import WorkerSignals
 from .pipeline_worker import PipelineWorker
 from .video_info_worker import VideoInfoWorker, VideoInfoSignals
 from .tracklist_ai_worker import TracklistAiWorker, TracklistAiSignals
+from .tracklist_find_worker import TracklistFindWorker, TracklistFindSignals
 
 __all__ = [
     "WorkerSignals",
@@ -12,4 +13,6 @@ __all__ = [
     "VideoInfoSignals",
     "TracklistAiWorker",
     "TracklistAiSignals",
+    "TracklistFindWorker",
+    "TracklistFindSignals",
 ]

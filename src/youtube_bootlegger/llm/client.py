@@ -101,18 +101,37 @@ def complete_structured(
 
 
 def strict_json_schema(model: type[BaseModel]) -> JsonObject:
-    """Return a strict object schema (all fields required, no extras) for ``model``."""
+    """Return a strict object schema (all fields required, no extras) for ``model``.
+
+    Nested models are inlined rather than referenced through ``$defs``, since
+    providers differ in ``$ref`` support, and every object is made strict.
+    """
     schema = model.model_json_schema()
+    defs = schema.pop("$defs", {})
     for key in ("$schema", "title", "description"):
         schema.pop(key, None)
-    properties = schema.get("properties")
+    return _strict_node(schema, defs)
+
+
+def _strict_node(node: Any, defs: Mapping[str, Any]) -> Any:
+    if isinstance(node, list):
+        return [_strict_node(item, defs) for item in node]
+    if not isinstance(node, dict):
+        return node
+    ref = node.get("$ref")
+    if isinstance(ref, str) and ref.startswith("#/$defs/"):
+        resolved = {key: value for key, value in defs[ref.removeprefix("#/$defs/")].items()
+                    if key not in ("title", "description")}
+        return _strict_node(resolved, defs)
+    strict = {key: _strict_node(value, defs) for key, value in node.items()
+              if key not in ("title", "properties")}
+    properties = node.get("properties")
     if isinstance(properties, dict):
-        schema["required"] = list(properties)
-        for prop in properties.values():
-            if isinstance(prop, dict):
-                prop.pop("title", None)
-    schema["additionalProperties"] = False
-    return schema
+        # Keys here are field names (a field may be called "title"), not keywords.
+        strict["properties"] = {name: _strict_node(prop, defs) for name, prop in properties.items()}
+        strict["required"] = list(properties)
+        strict["additionalProperties"] = False
+    return strict
 
 
 def build_chat_request(

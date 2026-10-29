@@ -17,11 +17,17 @@ from src.youtube_bootlegger.qml_backend import AppBackend
 from src.youtube_bootlegger.qml_backend import backend as backend_module
 from src.youtube_bootlegger.workers import TracklistAiWorker
 from src.youtube_bootlegger.workers import video_info_worker as video_worker_module
+from src.youtube_bootlegger.app_logic import track_finder as finder_text
 from tests.qml_support import (
     OTHER_URL,
     VALID_URL,
     FakePipeline,
     click_item,
+    found_result,
+    log_messages,
+    make_video,
+    untimed_result,
+    use_api_model,
     fill_form,
     find_item,
     load_video,
@@ -102,7 +108,7 @@ class TestVideoInfo:
     def test_fetch_error_is_displayed_in_qml(self, qml_harness, monkeypatch):
         window, backend, _settings = qml_harness
 
-        def failing_fetch(url, settings=None):
+        def failing_fetch(url, settings=None, comment_limit=0):
             raise ValidationError("Video unavailable")
 
         monkeypatch.setattr(video_worker_module, "fetch_video_info", failing_fetch)
@@ -478,6 +484,303 @@ class TestAiAssist:
         assert "Prompt copied" in prop(window, "msgBody")
 
 
+FOUND_TEXT = "Intro - 0:00\nSong Two - 4:05"
+FOUND_BANNER = "✨ Filled by AI from comment #3: 2 tracks. Check it before downloading."
+
+
+def finder_rows(window) -> tuple[bool, bool, bool]:
+    """Visibility of the (searching, banner, hint) rows above the track list."""
+    return (
+        prop(window, "findSearchingRow", "visible"),
+        prop(window, "findBannerRow", "visible"),
+        prop(window, "apiHintRow", "visible"),
+    )
+
+
+class TestTrackFinder:
+    def test_auto_find_fills_form_shows_banner_and_logs_source(
+        self, qml_harness, fake_find, monkeypatch
+    ):
+        window, backend, _settings = qml_harness
+        limits = []
+
+        def fetch(url, settings=None, comment_limit=0):
+            limits.append(comment_limit)
+            return make_video()
+
+        monkeypatch.setattr(video_worker_module, "fetch_video_info", fetch)
+        fake_find.result = found_result()
+        use_api_model(backend)
+        type_text(window, "templateField", "%mm%:%ss% %songname%")
+
+        load_video(window, backend)
+        wait_until(lambda: prop(window, "findBannerRow", "visible"))
+
+        assert limits == [20]  # Comments only with an API model.
+        assert prop(window, "tracklistArea") == FOUND_TEXT
+        assert prop(window, "templateField") == "%songname% - %mm%:%ss%"
+        assert prop(window, "artistField") == "AI Band"
+        assert prop(window, "albumField") == "AI Album"
+        assert prop(window, "previewStatusText") == "2 tracks"
+        assert prop(window, "findBannerText") == FOUND_BANNER
+        assert prop(window, "templateSetByAi", "visible") is True
+        assert finder_rows(window) == (False, True, False)
+        assert prop(window, "aiButtonText") == "✨ Detect format"
+        assert log_messages(backend)[-5:] == [
+            "Video info: no description, 0 chapters, 0 comments",
+            "AI: found 2 timestamped tracks in comment #3",
+            'AI: format set to "%songname% - %mm%:%ss%"',
+            'AI: artist set to "AI Band"',
+            'AI: album set to "AI Album"',
+        ]
+
+    def test_auto_find_keeps_typed_artist_and_album(self, qml_harness, fake_find):
+        window, backend, _settings = qml_harness
+        fake_find.result = found_result()
+        use_api_model(backend)
+        type_text(window, "artistField", "My Band")
+        type_text(window, "albumField", "My Album")
+
+        load_video(window, backend)
+        wait_until(lambda: prop(window, "tracklistArea") == FOUND_TEXT)
+
+        assert prop(window, "artistField") == "My Band"
+        assert prop(window, "albumField") == "My Album"
+
+    def test_lite_shows_hint_and_find_click_explains(self, qml_harness, fake_find):
+        window, backend, _settings = qml_harness
+        load_video(window, backend)
+
+        assert finder_rows(window) == (False, False, True)
+        assert prop(window, "apiHintText") == finder_text.API_HINT_TEXT
+        assert prop(window, "aiButtonText") == "✨ Find with AI"
+        assert prop(window, "aiButtonRect", "enabled") is True
+
+        click_item(window, "aiButton")
+        assert prop(window, "msgOverlay", "visible") is True
+        assert prop(window, "msgBody") == finder_text.NEEDS_API_MODEL_MESSAGE
+        click_item(window, "msgCloseButton")
+
+        click_item(window, "apiHintOpenSettings")
+        assert find_item(window, "settingsPanel").property("open") is True
+        click_item(window, "settingsDoneButton")
+
+        click_item(window, "apiHintDismiss")
+        assert finder_rows(window) == (False, False, False)
+        assert fake_find.calls == []
+
+    def test_hint_hides_once_an_api_model_is_configured(self, qml_harness):
+        window, backend, _settings = qml_harness
+        load_video(window, backend)
+        assert prop(window, "apiHintRow", "visible") is True
+
+        use_api_model(backend)
+        assert prop(window, "apiHintRow", "visible") is False
+
+    def test_checkbox_off_skips_auto_find_but_button_still_finds(
+        self, qml_harness, fake_find
+    ):
+        window, backend, settings = qml_harness
+        fake_find.result = found_result()
+        use_api_model(backend)
+        open_settings(window)
+        assert prop(window, "autoFindNote") == finder_text.AUTO_FIND_SETTING_NOTE
+        click_item(window, "autoFindToggle")
+        click_item(window, "settingsDoneButton")
+        assert settings.auto_find_tracklist is False
+
+        load_video(window, backend)
+        wait_for_workers(backend)
+        assert fake_find.calls == []
+        assert prop(window, "tracklistArea") == ""
+
+        click_item(window, "aiButton")
+        wait_until(lambda: prop(window, "tracklistArea") == FOUND_TEXT)
+        assert len(fake_find.calls) == 1
+
+    def test_untimed_list_leaves_box_empty_and_warns(self, qml_harness, fake_find):
+        window, backend, _settings = qml_harness
+        fake_find.result = untimed_result()
+        use_api_model(backend)
+
+        load_video(window, backend)
+        wait_until(lambda: "without timestamps" in log_messages(backend)[-1])
+
+        assert log_messages(backend)[-1] == (
+            "AI: found song names without timestamps in the description; "
+            "add timestamps to use it"
+        )
+        assert backend.statusLogModel._items[-1]["level"] == "warn"
+        assert prop(window, "tracklistArea") == ""
+        assert finder_rows(window) == (False, False, False)
+
+    def test_no_list_found_only_logs(self, qml_harness, fake_find):
+        window, backend, _settings = qml_harness
+        use_api_model(backend)
+
+        load_video(window, backend)
+        wait_until(lambda: "no track list" in log_messages(backend)[-1])
+
+        assert prop(window, "tracklistArea") == ""
+        assert prop(window, "msgOverlay", "visible") is False
+
+    def test_auto_find_error_only_logs_but_manual_error_shows_message(
+        self, qml_harness, fake_find
+    ):
+        window, backend, _settings = qml_harness
+        fake_find.error = "LLM request failed: HTTP 401"
+        use_api_model(backend)
+
+        load_video(window, backend)
+        wait_until(lambda: "HTTP 401" in log_messages(backend)[-1])
+        assert prop(window, "msgOverlay", "visible") is False
+
+        click_item(window, "aiButton")
+        wait_until(lambda: prop(window, "msgOverlay", "visible") is True)
+        assert prop(window, "msgTitle") == "AI Assist"
+        assert prop(window, "msgBody") == "LLM request failed: HTTP 401"
+
+    def test_stop_discards_the_result(self, qml_harness, fake_find):
+        window, backend, _settings = qml_harness
+        fake_find.gate = threading.Event()
+        fake_find.result = found_result()
+        use_api_model(backend)
+
+        load_video(window, backend)
+        wait_until(lambda: prop(window, "findSearchingRow", "visible"))
+        assert prop(window, "findSearchingText") == finder_text.SEARCHING_TEXT
+        assert prop(window, "aiButtonRect", "enabled") is False
+
+        click_item(window, "findStopButton")
+        assert finder_rows(window)[0] is False
+        assert log_messages(backend)[-1] == "AI: search stopped"
+        assert prop(window, "aiButtonRect", "enabled") is True
+
+        fake_find.release()
+        wait_for_workers(backend)
+        assert prop(window, "tracklistArea") == ""
+        assert prop(window, "findBannerRow", "visible") is False
+
+    def test_typing_during_search_cancels_it(self, qml_harness, fake_find):
+        window, backend, _settings = qml_harness
+        fake_find.gate = threading.Event()
+        fake_find.result = found_result()
+        use_api_model(backend)
+
+        load_video(window, backend)
+        wait_until(lambda: prop(window, "findSearchingRow", "visible"))
+        type_text(window, "tracklistArea", "M")
+
+        assert prop(window, "findSearchingRow", "visible") is False
+        assert log_messages(backend)[-1] == (
+            "AI: search stopped because you edited the track list"
+        )
+        fake_find.release()
+        wait_for_workers(backend)
+        assert prop(window, "tracklistArea") == "M"
+
+    def test_undo_restores_previous_values(self, qml_harness, fake_find):
+        window, backend, _settings = qml_harness
+        fake_find.result = found_result()
+        use_api_model(backend)
+        type_text(window, "templateField", "%mm%:%ss% %songname%")
+
+        load_video(window, backend)
+        wait_until(lambda: prop(window, "findBannerRow", "visible"))
+        click_item(window, "findUndoButton")
+
+        assert prop(window, "tracklistArea") == ""
+        assert prop(window, "templateField") == "%mm%:%ss% %songname%"
+        assert prop(window, "artistField") == ""
+        assert prop(window, "albumField") == ""
+        assert prop(window, "findBannerRow", "visible") is False
+        assert prop(window, "templateSetByAi", "visible") is False
+
+    def test_editing_the_fill_hides_banner_and_marker(self, qml_harness, fake_find):
+        window, backend, _settings = qml_harness
+        fake_find.result = found_result()
+        use_api_model(backend)
+
+        load_video(window, backend)
+        wait_until(lambda: prop(window, "findBannerRow", "visible"))
+        set_text(window, "tracklistArea", FOUND_TEXT + "\nEncore - 9:00")
+
+        assert prop(window, "findBannerRow", "visible") is False
+        assert prop(window, "templateSetByAi", "visible") is False
+
+    def test_dismissing_banner_keeps_the_fill(self, qml_harness, fake_find):
+        window, backend, _settings = qml_harness
+        fake_find.result = found_result()
+        use_api_model(backend)
+
+        load_video(window, backend)
+        wait_until(lambda: prop(window, "findBannerRow", "visible"))
+        click_item(window, "findBannerDismiss")
+
+        assert prop(window, "findBannerRow", "visible") is False
+        assert prop(window, "tracklistArea") == FOUND_TEXT
+        assert prop(window, "templateSetByAi", "visible") is True
+
+    def test_url_change_clears_unedited_fill_and_cache_avoids_second_call(
+        self, qml_harness, fake_find
+    ):
+        window, backend, _settings = qml_harness
+        fake_find.result = found_result()
+        use_api_model(backend)
+
+        load_video(window, backend)
+        wait_until(lambda: prop(window, "tracklistArea") == FOUND_TEXT)
+
+        backend.URL_DEBOUNCE_MS = 10_000
+        set_text(window, "urlField", OTHER_URL)
+        assert prop(window, "tracklistArea") == ""
+        assert prop(window, "findBannerRow", "visible") is False
+
+        backend.URL_DEBOUNCE_MS = 10
+        set_text(window, "urlField", VALID_URL)
+        wait_until(lambda: prop(window, "tracklistArea") == FOUND_TEXT)
+        assert len(fake_find.calls) == 1
+
+    def test_url_change_keeps_edited_fill(self, qml_harness, fake_find):
+        window, backend, _settings = qml_harness
+        fake_find.result = found_result()
+        use_api_model(backend)
+
+        load_video(window, backend)
+        wait_until(lambda: prop(window, "tracklistArea") == FOUND_TEXT)
+        set_text(window, "tracklistArea", "Mine - 0:00")
+        set_text(window, "urlField", OTHER_URL)
+
+        assert prop(window, "tracklistArea") == "Mine - 0:00"
+
+    def test_url_change_during_search_drops_the_result(self, qml_harness, fake_find):
+        window, backend, _settings = qml_harness
+        fake_find.gate = threading.Event()
+        fake_find.result = found_result()
+        use_api_model(backend)
+
+        load_video(window, backend)
+        wait_until(lambda: prop(window, "findSearchingRow", "visible"))
+        backend.URL_DEBOUNCE_MS = 10_000
+        set_text(window, "urlField", OTHER_URL)
+
+        assert prop(window, "findSearchingRow", "visible") is False
+        assert log_messages(backend)[-1] == "AI: search stopped because the video changed"
+        fake_find.release()
+        wait_for_workers(backend)
+        assert prop(window, "tracklistArea") == ""
+
+    def test_filled_box_switches_button_to_detect_format(self, qml_harness, fake_find):
+        window, backend, _settings = qml_harness
+        load_video(window, backend)
+        assert prop(window, "aiButtonText") == "✨ Find with AI"
+
+        set_text(window, "tracklistArea", "Intro - 0:00")
+        assert prop(window, "aiButtonText") == "✨ Detect format"
+        assert prop(window, "apiHintRow", "visible") is False
+        assert fake_find.calls == []
+
+
 class TestPanelsAndDialogs:
     def test_help_panel_opens_and_closes(self, qml_harness):
         window, _backend, _settings = qml_harness
@@ -537,6 +840,29 @@ class TestPanelsAndDialogs:
             assert prop(window2, "anthropicKeyField") == "sk-ant-123"
             assert prop(window2, "anthropicModelField") == "claude-custom"
             assert warnings == []
+
+    def test_log_requests_toggle_persists(self, qml_harness):
+        window, backend, settings = qml_harness
+        open_settings(window)
+        assert settings.log_ai_requests is False
+        click_item(window, "logRequestsToggle")
+        click_item(window, "settingsDoneButton")
+        assert settings.log_ai_requests is True
+        assert backend.logAiRequests is True
+
+    def test_settings_done_visible_at_minimum_window_size(self, qml_harness):
+        window, backend, _settings = qml_harness
+        backend.setLlmProvider("openai_compatible")  # Tallest provider form.
+        window.setWidth(window.minimumWidth())
+        window.setHeight(window.minimumHeight())
+        QApplication.instance().processEvents()
+        open_settings(window)
+        QApplication.instance().processEvents()
+        # No scrolling first: Done must already be inside the window.
+        done = find_item(window, "settingsDoneButton")
+        top_left = done.mapToItem(window.contentItem(), 0, 0)
+        assert top_left.y() >= 0
+        assert top_left.y() + done.height() <= window.height()
 
     def test_settings_field_saves_on_enter_without_done(self, qml_harness):
         window, _backend, settings = qml_harness

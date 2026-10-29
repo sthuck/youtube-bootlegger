@@ -27,7 +27,10 @@ uv run python main_tui.py
 
 - `core/`, `llm/`, `models/`, `utils/`: business logic. Only `PySide6.QtCore` (`QSettings`) is required, so all three UIs share `core/settings.py` and the same settings file.
 - `app_logic/`: UI-agnostic glue shared by the front-ends (form validation → `DownloadJob`, preview/progress/video display strings, help content). Put behaviour here rather than duplicating it per UI.
+- `core/ytdlp_metadata.py` is the only place that asks yt-dlp for metadata (bundled library or external executable per settings); `fetch_video_info` builds on it and returns description, chapters and (with `comment_limit`) comments from a single request. Track-source plans are in `docs/video-track-sources-investigation.md`.
+- AI track-list finder: `llm/track_finder.py` asks the API model for a list and validates every entry against the source text; `app_logic/track_finder.py` holds everything the UIs show or decide (button mode, auto-run, hint, log/banner strings) and `TrackFinderSession`, the per-window state (request tokens, cache, Undo). Front-ends only wire events to it.
 - `ui/` (widgets), `qml/` + `qml_backend/` (QML), `tui/` (Textual) are the three front-ends.
+- `llm/request_log.py`: Settings → "Log AI requests" wraps `http_post` in both AI calls and appends each request/response (credentials redacted) to `ai-requests.log` next to the settings file. `AppSettings.ai_request_log_path` is None for test backends, so tests never write to the real config folder.
 - `llm/chatgpt_lite.py` takes injectable `open_url`/`copy_text` callables; Qt implementations are the default, the TUI passes its own.
 
 ### Running tests

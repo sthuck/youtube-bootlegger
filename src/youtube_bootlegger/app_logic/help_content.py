@@ -1,6 +1,12 @@
 """User-facing help text shared by the QML and TUI help panels."""
 
 from ..core.template_parser import DEFAULT_TEMPLATE
+from .presentation import LOG_AI_REQUESTS_LABEL
+from .track_finder import (
+    AUTO_FIND_SETTING_LABEL,
+    DETECT_FORMAT_BUTTON_LABEL,
+    FIND_BUTTON_LABEL,
+)
 
 
 def build_help_content() -> dict:
@@ -28,8 +34,9 @@ def build_help_content() -> dict:
                 "title": "Enter the track list",
                 "body": (
                     "Paste or type your track list in the text area — one song per line, "
-                    "as copied from a setlist or video description. You can refine the "
-                    "format in the next step."
+                    "as copied from a setlist or video description. With an AI model set "
+                    "up, the app can find and fill it in for you (see AI Assist below). "
+                    "You can refine the format in the next step."
                 ),
             },
             {
@@ -47,7 +54,8 @@ def build_help_content() -> dict:
                 "title": "Fill in metadata",
                 "body": (
                     "Enter an artist name (required). Album is optional — if left blank, "
-                    "the video title is used when saving files."
+                    "the video title is used when saving files. AI Assist fills both in "
+                    "when they're empty; anything you type is kept."
                 ),
             },
             {
@@ -106,10 +114,21 @@ def build_help_content() -> dict:
         ),
         "aiTitle": "AI ASSIST",
         "aiBody": (
-            "Click the AI button next to the track list to auto-detect the best "
-            "template, artist, and album from your raw track list and video title. "
-            "Requires an LLM provider configured in Settings (gear icon). Track list "
-            "text and video title are sent to the selected provider."
+            f"With an empty track list, {FIND_BUTTON_LABEL} looks for a set list in "
+            "the video's description, chapters and comments, then fills in the track "
+            "list and the template. It also fills in the artist and album if they're "
+            "empty, even when no usable list is found. A list without timestamps "
+            "can't be used for splitting, so it's only reported in the log. The log "
+            "says where the list came from; check it before downloading, or Undo. "
+            f"With \"{AUTO_FIND_SETTING_LABEL}\" on in Settings, this runs on its own "
+            "when a video loads. Finding needs an API model (OpenAI, Anthropic, …), "
+            "not ChatGPT Lite.\n\n"
+            f"Once the track list has text, the button becomes {DETECT_FORMAT_BUTTON_LABEL}: "
+            "it detects the best template, artist, and album from your track list and "
+            "the video title. This works with any provider, including ChatGPT Lite.\n\n"
+            "Choose the provider in Settings (File → Settings, or F2 in the terminal "
+            "app). The video's title, description, chapters and comments, or your "
+            "track list, are sent to it."
         ),
         "outputTitle": "OUTPUT",
         "outputBody": (
@@ -122,7 +141,8 @@ def build_help_content() -> dict:
         "requirements": [
             "FFmpeg — required for splitting audio. Install it or set a custom path in Settings.",
             "yt-dlp — bundled with the app. An external binary is optional in Settings.",
-            "LLM provider — optional, only needed for AI Assist.",
+            "AI provider — optional, only needed for AI Assist. Finding track lists "
+            "needs an API model; ChatGPT Lite can only detect the format.",
         ],
         "troubleshootingTitle": "TROUBLESHOOTING",
         "troubleshooting": [
@@ -131,5 +151,10 @@ def build_help_content() -> dict:
             "Red preview rows — a line does not match the template. Check placeholders and timestamp format.",
             "Cannot start — artist name is required. Fix any template or directory errors shown in red.",
             "Cancel — use the Cancel button while a download or split is in progress.",
+            "AI didn't fill the track list — the log says why (no list found, no "
+            "timestamps, or an error). It only fills an empty box, and needs an API model.",
+            f"Debugging AI results — turn on \"{LOG_AI_REQUESTS_LABEL}\" in Settings to "
+            "save each request and response (without API keys) to ai-requests.log in "
+            "the settings folder; Settings shows the full path.",
         ],
     }

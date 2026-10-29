@@ -9,6 +9,13 @@ from ..llm import is_llm_configured
 
 MAX_TITLE_LENGTH = 80
 
+AI_PROVIDERS_NOTE = (
+    "Lite opens ChatGPT in your browser — no API key. Built-in providers send "
+    "the track list, video title, description, chapters and top comments to "
+    "the selected API using credentials stored locally."
+)
+LOG_AI_REQUESTS_LABEL = "Log AI requests (for debugging)"
+
 STAGE_LABELS = {
     "download": "Downloading",
     "split": "Splitting",
@@ -78,3 +85,10 @@ def check_ai_assist_ready(
     if not is_llm_configured(settings):
         return "LLM is not configured. Add API credentials in Settings."
     return None
+
+
+def log_ai_requests_note(settings: AppSettings) -> str:
+    """Settings note under LOG_AI_REQUESTS_LABEL, naming the log file."""
+    path = settings.ai_request_log_path
+    where = str(path) if path else "ai-requests.log in the settings folder"
+    return f"Saves each AI request and response, without API keys, to {where}."

@@ -1,6 +1,7 @@
 """Persistent application settings for external tool configuration."""
 
 from enum import StrEnum
+from pathlib import Path
 from typing import Any, Protocol
 
 from PySide6.QtCore import QSettings
@@ -22,6 +23,9 @@ _VERTEX_MODEL_KEY = "llm/vertex_model"
 _COMPATIBLE_BASE_URL_KEY = "llm/compatible_base_url"
 _COMPATIBLE_BEARER_TOKEN_KEY = "llm/compatible_bearer_token"
 _COMPATIBLE_MODEL_KEY = "llm/compatible_model"
+_AUTO_FIND_TRACKLIST_KEY = "llm/auto_find_tracklist"
+_LOG_AI_REQUESTS_KEY = "llm/log_requests"
+AI_REQUEST_LOG_NAME = "ai-requests.log"
 
 
 class LlmProvider(StrEnum):
@@ -195,6 +199,42 @@ class AppSettings:
     @compatible_model.setter
     def compatible_model(self, value: str) -> None:
         self._backend.setValue(_COMPATIBLE_MODEL_KEY, (value or "").strip())
+
+    @property
+    def auto_find_tracklist(self) -> bool:
+        """Run the AI track-list finder automatically when a video loads.
+
+        Defaults to True. Only takes effect with an API model (not ChatGPT
+        Lite); the "Find with AI" button works regardless of this setting.
+        """
+        return _to_bool(self._backend.value(_AUTO_FIND_TRACKLIST_KEY, True))
+
+    @auto_find_tracklist.setter
+    def auto_find_tracklist(self, enabled: bool) -> None:
+        self._backend.setValue(_AUTO_FIND_TRACKLIST_KEY, bool(enabled))
+
+    @property
+    def log_ai_requests(self) -> bool:
+        """Write each AI API request and response to ai_request_log_path.
+
+        A debugging aid; defaults to False. API keys are never written.
+        """
+        return _to_bool(self._backend.value(_LOG_AI_REQUESTS_KEY, False))
+
+    @log_ai_requests.setter
+    def log_ai_requests(self, enabled: bool) -> None:
+        self._backend.setValue(_LOG_AI_REQUESTS_KEY, bool(enabled))
+
+    @property
+    def ai_request_log_path(self) -> Path | None:
+        """The AI request log, next to the settings file.
+
+        None when the settings aren't stored in a file (e.g. in tests).
+        """
+        file_name = getattr(self._backend, "fileName", None)
+        if not callable(file_name) or not file_name():
+            return None
+        return Path(file_name()).parent / AI_REQUEST_LOG_NAME
 
     def sync(self) -> None:
         """Flush settings to persistent storage."""
