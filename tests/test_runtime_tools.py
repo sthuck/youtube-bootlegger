@@ -51,7 +51,7 @@ def test_linux_and_macos_use_xdg_data_home(monkeypatch, tmp_path):
 def test_relative_xdg_data_home_is_ignored(monkeypatch, tmp_path):
     monkeypatch.setattr(sys, "platform", "darwin")
     monkeypatch.setenv("XDG_DATA_HOME", "relative/dir")
-    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))  # HOME is ignored on Windows
     assert default_tools_dir() == tmp_path / ".local" / "share" / "youtube-bootlegger" / "tools"
 
 
