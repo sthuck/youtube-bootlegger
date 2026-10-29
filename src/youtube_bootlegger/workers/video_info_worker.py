@@ -3,6 +3,7 @@
 from PySide6.QtCore import QObject, QRunnable, Signal
 
 from ..core.exceptions import ValidationError
+from ..core.settings import AppSettings
 from ..core.video_info import VideoInfo, fetch_video_info
 
 
@@ -17,14 +18,16 @@ class VideoInfoSignals(QObject):
 class VideoInfoWorker(QRunnable):
     """QRunnable worker for fetching video info in background."""
 
-    def __init__(self, url: str):
+    def __init__(self, url: str, settings: AppSettings | None = None):
         """Initialize the worker.
 
         Args:
             url: YouTube URL to fetch info for.
+            settings: Application settings. Defaults to the shared singleton.
         """
         super().__init__()
         self.url = url
+        self.settings = settings
         self.signals = VideoInfoSignals()
 
     def run(self) -> None:
@@ -32,7 +35,7 @@ class VideoInfoWorker(QRunnable):
         self.signals.started.emit()
 
         try:
-            info = fetch_video_info(self.url)
+            info = fetch_video_info(self.url, settings=self.settings)
             self.signals.finished.emit(info)
         except ValidationError as e:
             self.signals.error.emit(str(e))

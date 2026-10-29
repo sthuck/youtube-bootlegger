@@ -24,7 +24,7 @@ from ..app_logic import (
 )
 from ..core import DEFAULT_TEMPLATE, preview_parse, validate_template
 from ..llm import is_llm_configured, launch_chatgpt_lite_assist
-from ..core.settings import LlmProvider, get_settings
+from ..core.settings import AppSettings, LlmProvider, get_settings
 from ..core.video_info import VideoInfo
 from ..models import DownloadJob
 from ..utils import is_ffmpeg_available, is_valid_youtube_url
@@ -47,6 +47,7 @@ class AppBackend(QObject):
     """
 
     URL_DEBOUNCE_MS = 500
+    DEFAULT_ALBUM_PLACEHOLDER = "Defaults to video title"
 
     # ── Notify signals ──────────────────────────────────────────────
     urlErrorChanged = Signal()
@@ -142,11 +143,15 @@ class AppBackend(QObject):
     statusLogModel = Property(QObject, _getter("_log_model"), constant=True)
     helpContent = Property("QVariantMap", _getter("_help_content"), constant=True)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, settings: AppSettings | None = None):
         super().__init__(parent)
         self._thread_pool = QThreadPool()
         self._current_worker: PipelineWorker | None = None
-        self._video_info_worker: VideoInfoWorker | None = None
+        # Every in-flight fetch is held until it reports back: a worker's
+        # signals object must outlive the thread emitting on it, even after a
+        # newer request has superseded it.
+        self._video_info_workers: set[VideoInfoWorker] = set()
+        self._video_request_id = 0
         self._tracklist_ai_worker: TracklistAiWorker | None = None
         self._video_info: VideoInfo | None = None
         self._last_fetched_url = ""
@@ -174,7 +179,7 @@ class AppBackend(QObject):
         self._preview_valid = True
         self._artist = ""
         self._album = ""
-        self._album_placeholder = "Defaults to video title"
+        self._album_placeholder = self.DEFAULT_ALBUM_PLACEHOLDER
         self._metadata_error = ""
         self._output_dir = str(Path.home() / "Music")
         self._dir_error = ""
@@ -182,7 +187,7 @@ class AppBackend(QObject):
         self._progress_percent = 0.0
         self._progress_stage = "Ready"
 
-        self._app_settings = get_settings()
+        self._app_settings = settings if settings is not None else get_settings()
         self._use_external_ytdlp = self._app_settings.use_external_ytdlp
         self._ytdlp_path = self._app_settings.ytdlp_path
         self._ffmpeg_path = self._app_settings.ffmpeg_path
@@ -240,14 +245,17 @@ class AppBackend(QObject):
         self._emit("_url_error", "", self.urlErrorChanged)
         self._url_debounce.stop()
 
-        if not url:
-            self._clear_video()
-            self._last_fetched_url = ""
+        if url and url == self._last_fetched_url:
             return
-        if not is_valid_youtube_url(url):
+
+        # Invalidate immediately: the debounce window must not leave the
+        # previous video attached to a new URL, and bumping the request id
+        # drops any in-flight result for the old URL.
+        self._last_fetched_url = ""
+        self._video_request_id += 1
+        if self._has_video_state():
             self._clear_video()
-            return
-        if url == self._last_fetched_url:
+        if not url or not is_valid_youtube_url(url):
             return
         self._url_debounce.start(self.URL_DEBOUNCE_MS)
 
@@ -271,13 +279,15 @@ class AppBackend(QObject):
 
     @Slot(str)
     def setArtist(self, text):
-        self._artist = text.strip()
+        # Stored as typed (build_job trims): stripping here would be written
+        # back into the field and swallow the space between words.
+        self._artist = text
         self.artistNameChanged.emit()
         self._emit("_metadata_error", "", self.metadataErrorChanged)
 
     @Slot(str)
     def setAlbum(self, text):
-        self._album = text.strip()
+        self._album = text
         self.albumNameChanged.emit()
         self._emit("_metadata_error", "", self.metadataErrorChanged)
 
@@ -448,6 +458,8 @@ class AppBackend(QObject):
 
     @Slot()
     def startPipeline(self):
+        if self._busy:
+            return
         self._emit("_url_error", "", self.urlErrorChanged)
         self._emit("_dir_error", "", self.dirErrorChanged)
         self._emit("_metadata_error", "", self.metadataErrorChanged)
@@ -480,7 +492,7 @@ class AppBackend(QObject):
 
     @Slot()
     def cancelPipeline(self):
-        if self._current_worker:
+        if self._current_worker and self._busy:
             self._current_worker.cancel()
             self._log_model.append("Cancelling...", "warn")
 
@@ -496,12 +508,26 @@ class AppBackend(QObject):
         self._last_fetched_url = url
         self._set_video_loading()
 
-        self._video_info_worker = VideoInfoWorker(url)
-        self._video_info_worker.signals.finished.connect(self._on_video_info_loaded)
-        self._video_info_worker.signals.error.connect(self._on_video_info_error)
-        self._thread_pool.start(self._video_info_worker)
+        self._video_request_id += 1
+        request_id = self._video_request_id
+        worker = VideoInfoWorker(url, settings=self._app_settings)
+        self._video_info_workers.add(worker)
 
-    def _on_video_info_loaded(self, info: VideoInfo):
+        def on_loaded(info):
+            self._video_info_workers.discard(worker)
+            self._on_video_info_loaded(info, request_id)
+
+        def on_error(message):
+            self._video_info_workers.discard(worker)
+            self._on_video_info_error(message, request_id)
+
+        worker.signals.finished.connect(on_loaded)
+        worker.signals.error.connect(on_error)
+        self._thread_pool.start(worker)
+
+    def _on_video_info_loaded(self, info: VideoInfo, request_id: int):
+        if request_id != self._video_request_id:
+            return
         self._video_info = info
         summary = summarize_video(info)
         self._emit("_video_title", summary.title, self.videoTitleChanged)
@@ -516,7 +542,11 @@ class AppBackend(QObject):
         self._emit("_album_placeholder", info.title, self.albumPlaceholderChanged)
         self._refresh_ai_available()
 
-    def _on_video_info_error(self, message: str):
+    def _on_video_info_error(self, message: str, request_id: int):
+        if request_id != self._video_request_id:
+            return
+        self._video_info = None
+        self._last_fetched_url = ""
         self._emit("_video_error", message, self.videoErrorChanged)
         self._emit("_video_loading", False, self.videoLoadingChanged)
         self._emit("_video_loaded", False, self.videoLoadedChanged)
@@ -535,6 +565,16 @@ class AppBackend(QObject):
         self._emit("_video_error", "", self.videoErrorChanged)
         self._refresh_ai_available()
 
+    def _has_video_state(self) -> bool:
+        return (
+            self._video_info is not None
+            or self._video_loading
+            or self._video_loaded
+            or self._video_error != ""
+            or self._video_title != ""
+            or self._album_placeholder != self.DEFAULT_ALBUM_PLACEHOLDER
+        )
+
     def _clear_video(self):
         self._video_info = None
         for attr, sig in [
@@ -547,6 +587,9 @@ class AppBackend(QObject):
             ("_video_error", self.videoErrorChanged),
         ]:
             self._emit(attr, "", sig)
+        self._emit(
+            "_album_placeholder", self.DEFAULT_ALBUM_PLACEHOLDER, self.albumPlaceholderChanged
+        )
         self._emit("_video_loading", False, self.videoLoadingChanged)
         self._emit("_video_loaded", False, self.videoLoadedChanged)
         self._refresh_ai_available()
@@ -572,7 +615,7 @@ class AppBackend(QObject):
         self._emit("_progress_stage", "Starting...", self.progressStageChanged)
         self._log_model.append("Starting...", "info")
 
-        self._current_worker = PipelineWorker(job)
+        self._current_worker = PipelineWorker(job, settings=self._app_settings)
         self._current_worker.signals.started.connect(self._on_worker_started)
         self._current_worker.signals.progress.connect(self._on_progress)
         self._current_worker.signals.log.connect(self._on_log)

@@ -47,7 +47,9 @@ Rectangle {
                 width: durText.implicitWidth + 12; height: 20
                 radius: 4; color: "#cc000000"
                 Text {
-                    id: durText; anchors.centerIn: parent
+                    id: durText
+                    objectName: "videoDurationText"
+                    anchors.centerIn: parent
                     text: backend.videoDuration.replace("Duration: ", "")
                     color: "white"; font { pixelSize: 10; weight: Font.DemiBold }
                 }
@@ -61,6 +63,7 @@ Rectangle {
             spacing: 6
 
             Text {
+                objectName: "videoTitleText"
                 text: backend.videoTitle || ""
                 color: backend.videoError ? root.colors.error : root.colors.text
                 font { pixelSize: 14; weight: Font.Bold }
@@ -71,6 +74,7 @@ Rectangle {
             }
 
             Text {
+                objectName: "videoChannelText"
                 text: backend.videoChannel
                 color: root.colors.textSec
                 font.pixelSize: 12

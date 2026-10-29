@@ -36,6 +36,7 @@ Rectangle {
                 Behavior on border.color { ColorAnimation { duration: 150 } }
                 TextInput {
                     id: tplField
+                    objectName: "templateField"
                     anchors { fill: parent; leftMargin: 12; rightMargin: 12 }
                     verticalAlignment: Text.AlignVCenter
                     color: root.colors.text; font { pixelSize: 13; family: "monospace" }
@@ -46,6 +47,7 @@ Rectangle {
             }
 
             Text {
+                objectName: "templateErrorText"
                 text: backend.templateError; color: root.colors.warning; font.pixelSize: 10
                 visible: backend.templateError !== ""
                 Layout.fillWidth: true; wrapMode: Text.Wrap
@@ -60,6 +62,7 @@ Rectangle {
             Item { Layout.fillWidth: true }
 
             Rectangle {
+                objectName: "aiButtonRect"
                 width: 52; height: 28; radius: root.colors.radiusSm
                 visible: !backend.aiAnalyzing
                 enabled: backend.aiAvailable && !backend.busy
@@ -67,7 +70,9 @@ Rectangle {
                 color: aiMA.containsMouse && enabled ? root.colors.accentHover : root.colors.accent
                 Text { anchors.centerIn: parent; text: "AI"; color: "white"; font { pixelSize: 12; weight: Font.DemiBold } }
                 MouseArea {
-                    id: aiMA; anchors.fill: parent
+                    id: aiMA
+                    objectName: "aiButton"
+                    anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
                     onClicked: if (enabled) backend.analyzeTracklistWithAi()
@@ -75,6 +80,7 @@ Rectangle {
             }
 
             BusyIndicator {
+                objectName: "aiBusyIndicator"
                 visible: backend.aiAnalyzing
                 Layout.preferredWidth: 24
                 Layout.preferredHeight: 24
@@ -117,6 +123,7 @@ Rectangle {
 
                     TextArea.flickable: TextArea {
                         id: trackArea
+                        objectName: "tracklistArea"
                         color: root.colors.text
                         font.pixelSize: 13
                         wrapMode: TextEdit.Wrap
@@ -151,6 +158,7 @@ Rectangle {
                     spacing: 6
                     Text { text: "Preview"; color: root.colors.textSec; font { pixelSize: 11; weight: Font.DemiBold } }
                     Text {
+                        objectName: "previewStatusText"
                         text: backend.previewStatus
                         color: backend.previewValid ? root.colors.success : root.colors.error
                         font.pixelSize: 11; visible: text !== ""
@@ -168,6 +176,7 @@ Rectangle {
 
                     ListView {
                         id: previewList
+                        objectName: "previewList"
                         anchors { fill: parent; margins: 6 }
                         model: backend.trackPreviewModel
                         spacing: 3

@@ -45,6 +45,7 @@ Item {
                 spacing: 20
 
                 Text {
+                    objectName: "helpTitleText"
                     text: help.title
                     color: root.colors.text
                     font { pixelSize: 18; weight: Font.Bold }
@@ -258,7 +259,9 @@ Item {
                     Behavior on color { ColorAnimation { duration: 120 } }
                     Text { anchors.centerIn: parent; text: "Close"; color: "white"; font { pixelSize: 13; weight: Font.DemiBold } }
                     MouseArea {
-                        id: closeMA; anchors.fill: parent
+                        id: closeMA
+                        objectName: "helpCloseButton"
+                        anchors.fill: parent
                         hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                         onClicked: root.open = false
                     }

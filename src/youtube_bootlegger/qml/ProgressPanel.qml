@@ -22,6 +22,7 @@ Rectangle {
 
             RowLayout {
                 Text {
+                    objectName: "progressStageText"
                     text: backend.progressStage
                     color: {
                         if (backend.progressStage === "Complete!") return root.colors.success
@@ -32,6 +33,7 @@ Rectangle {
                 }
                 Item { Layout.fillWidth: true }
                 Text {
+                    objectName: "progressPercentText"
                     text: Math.round(backend.progressPercent) + "%"
                     color: root.colors.textSec; font.pixelSize: 11
                     visible: backend.busy || backend.progressPercent > 0
@@ -68,6 +70,7 @@ Rectangle {
 
             ListView {
                 id: logList
+                objectName: "logList"
                 anchors { fill: parent; margins: 8 }
                 model: backend.statusLogModel
                 spacing: 2
