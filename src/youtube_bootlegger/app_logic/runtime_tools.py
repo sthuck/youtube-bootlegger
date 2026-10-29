@@ -58,6 +58,15 @@ class ToolsBanner:
 HIDDEN_BANNER = ToolsBanner(visible=False)
 
 
+@dataclass(frozen=True)
+class ToolsView:
+    """Everything a front-end renders, computed from one status lookup."""
+
+    statuses: list[ToolStatus]
+    banner: ToolsBanner
+    start_blocked_reason: str | None
+
+
 def format_size(size: int) -> str:
     return f"{size / 1_000_000:.0f} MB" if size >= 1_000_000 else f"{size / 1000:.0f} kB"
 
@@ -110,6 +119,8 @@ class RuntimeToolsSession:
         Empty while a download runs, or after the user cancelled or a
         download failed; the banner's button restarts those.
         """
+        if self._phase in (ToolsPhase.FAILED, ToolsPhase.CANCELLED) and not self.pending_ids():
+            self._phase = ToolsPhase.IDLE  # The user provided the tools some other way.
         if self._phase != ToolsPhase.IDLE:
             return []
         return self.start()
@@ -158,19 +169,25 @@ class RuntimeToolsSession:
         self._phase = ToolsPhase.CANCELLED
         self._progress = None
 
-    def banner(self) -> ToolsBanner:
+    def view(self) -> ToolsView:
+        """Statuses, banner and Start gating together; looks tools up only once."""
+        statuses = self.statuses()
+        return ToolsView(statuses, self.banner(statuses), self.start_blocked_reason(statuses))
+
+    def banner(self, statuses: list[ToolStatus] | None = None) -> ToolsBanner:
         if self._phase == ToolsPhase.DOWNLOADING:
             return ToolsBanner(
                 True, self._progress_text(), BannerAction.CANCEL, "Cancel",
                 progress=self._progress_fraction(),
             )
-        if self._phase == ToolsPhase.FAILED:
+        statuses = self.statuses() if statuses is None else statuses
+        pending = [s for s in statuses if s.needs_download]
+        # A failure only matters while something is still missing.
+        if self._phase == ToolsPhase.FAILED and pending:
             return ToolsBanner(
                 True, f"Tool download failed: {self._error}", BannerAction.DOWNLOAD, "Retry",
                 is_error=True,
             )
-        statuses = self.statuses()
-        pending = [s for s in statuses if s.needs_download]
         if pending:
             size = self._download_size([s.tool_id for s in pending])
             names = _join([s.label for s in pending])
@@ -193,9 +210,9 @@ class RuntimeToolsSession:
             )
         return HIDDEN_BANNER
 
-    def start_blocked_reason(self) -> str | None:
+    def start_blocked_reason(self, statuses: list[ToolStatus] | None = None) -> str | None:
         """Why Start can't run now, or None. FFmpeg is always needed; yt-dlp in external mode."""
-        needed = self._needed(self.statuses())
+        needed = self._needed(self.statuses() if statuses is None else statuses)
         for status in needed:
             if status.source == ToolSource.CUSTOM and not shutil.which(status.path):
                 return f"{status.label} not found at '{status.path}'. Fix the path in Settings."

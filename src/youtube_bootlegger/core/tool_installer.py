@@ -6,6 +6,7 @@ its installed.json marker already inside. A lock file keeps two running copies
 of the app from installing at the same time.
 """
 
+import http.client
 import json
 import shutil
 import tempfile
@@ -78,6 +79,10 @@ def install_tools(
     lock = QLockFile(str(store.root / ".install.lock"))
     lock.setStaleLockTime(0)  # Stale only if its owner process is gone.
     while not lock.tryLock(LOCK_POLL_MS):
+        # Only wait while another copy of the app holds the lock; a folder we
+        # can't write to would otherwise spin here forever.
+        if lock.error() != QLockFile.LockError.LockFailedError:
+            raise ToolInstallError(f"Could not write to {store.root}")
         cancel.raise_if_cancelled()
     try:
         _remove_leftover_staging(store.root)
@@ -161,8 +166,9 @@ def _download(asset: ToolAsset, target: Path, label: str, http_get, progress, ca
                     raise ToolInstallError(f"{label} download is larger than expected")
                 output.write(chunk)
                 progress.advance(label, len(chunk))
-    except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
-        reason = getattr(e, "reason", e)
+    except (urllib.error.URLError, TimeoutError, ConnectionError, http.client.HTTPException) as e:
+        # HTTPException covers a connection closed mid-download (IncompleteRead).
+        reason = getattr(e, "reason", None) or e
         raise ToolInstallError(f"Could not download {label}: {reason}") from e
     cancel.raise_if_cancelled()
     if file_sha256(target) != asset.sha256:

@@ -110,4 +110,4 @@ def fake_path(monkeypatch, names=()) -> None:
         return real_which(cmd, *args, **kwargs)
 
     monkeypatch.setattr(shutil, "which", which)
-    monkeypatch.setattr(tools, "_deno_is_supported", lambda path: True)
+    monkeypatch.setattr(tools, "_deno_is_supported", lambda *args: True)

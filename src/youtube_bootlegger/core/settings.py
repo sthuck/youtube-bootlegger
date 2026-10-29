@@ -243,9 +243,14 @@ class AppSettings:
         args = ["--encoding", "utf-8"]
         if "ffmpeg_location" in options:
             args.extend(["--ffmpeg-location", options["ffmpeg_location"]])
-        # A user-chosen yt-dlp may predate --js-runtimes (2025.11) and would
-        # reject it; it finds Deno on PATH by itself.
-        if "js_runtimes" in options and not self.ytdlp_path:
+        # Only the downloaded (pinned) yt-dlp is known to accept --js-runtimes.
+        # A user-chosen or PATH copy may predate it (2025.11) and would reject
+        # it; those find Deno on PATH by themselves.
+        downloaded_ytdlp = self.tool_store.executable("yt-dlp")
+        runs_downloaded = (
+            downloaded_ytdlp is not None and self.resolved_ytdlp_command() == str(downloaded_ytdlp)
+        )
+        if "js_runtimes" in options and runs_downloaded:
             args.extend(["--js-runtimes", f"deno:{options['js_runtimes']['deno']['path']}"])
         return args
 

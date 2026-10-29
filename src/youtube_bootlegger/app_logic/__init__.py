@@ -24,6 +24,7 @@ from .runtime_tools import (
     RuntimeToolsSession,
     ToolsBanner,
     ToolsPhase,
+    ToolsView,
     format_size,
     status_text,
 )
@@ -52,6 +53,7 @@ __all__ = [
     "RuntimeToolsSession",
     "ToolsBanner",
     "ToolsPhase",
+    "ToolsView",
     "format_size",
     "status_text",
     "AI_PROVIDERS_NOTE",

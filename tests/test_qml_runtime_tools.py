@@ -127,6 +127,31 @@ class TestFirstLaunch:
         assert not installed(tools_dir, server, ["ffmpeg"])
 
 
+def external_ytdlp_on(window) -> bool:
+    return prop(window, "externalYtdlpKnob", "x") > 2
+
+
+def test_ytdlp_toggle_turns_on_when_the_download_finishes(
+    qapp, server, store, tools_dir, monkeypatch
+):
+    """The downloaded yt-dlp becomes the default; the toggle must show it, and
+    one click must turn it off (it used to show off and need two clicks)."""
+    fake_path(monkeypatch, {"ffmpeg", "ffprobe", "deno"})
+    server.hold()
+    with tools_window(store, tools_dir, server) as (window, _backend):
+        open_settings(window)
+        wait_until(lambda: server.requests)
+        assert not external_ytdlp_on(window)
+
+        server.release()
+        wait_banner_gone(window)
+        wait_until(lambda: external_ytdlp_on(window))
+
+        click_item(window, "externalYtdlpToggle")
+        wait_until(lambda: not external_ytdlp_on(window))
+    assert AppSettings(store, tools_dir=tools_dir).use_external_ytdlp is False
+
+
 class TestBannerActions:
     def test_cancel_then_download_completes_the_install(
         self, qapp, server, store, tools_dir, monkeypatch

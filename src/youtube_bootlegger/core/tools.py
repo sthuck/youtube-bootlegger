@@ -21,6 +21,7 @@ from pathlib import Path
 from .tool_manifest import TOOL_LABELS, ToolSpec, tool_specs
 
 MARKER_NAME = "installed.json"
+DENO_CHECK_NAME = ".deno-on-path.json"
 MIN_DENO_MAJOR = 2
 
 
@@ -151,7 +152,7 @@ def tool_status(
     downloaded = store.executable(tool_id)
     if downloaded:
         return ToolStatus(tool_id, label, ToolSource.DOWNLOADED, str(downloaded), False, downloadable)
-    system = _on_path(tool_id)
+    system = _on_path(tool_id, store.root)
     if system:
         return ToolStatus(
             tool_id, label, ToolSource.SYSTEM, system, downloadable and not use_path, downloadable
@@ -159,20 +160,48 @@ def tool_status(
     return ToolStatus(tool_id, label, ToolSource.MISSING, None, downloadable, downloadable)
 
 
-def _on_path(tool_id: str) -> str | None:
+def _on_path(tool_id: str, cache_dir: Path | None) -> str | None:
     if tool_id == "ffmpeg":
         # yt-dlp looks for ffprobe beside FFmpeg; a lone ffmpeg isn't enough.
         ffmpeg, ffprobe = shutil.which("ffmpeg"), shutil.which("ffprobe")
         return ffmpeg if ffmpeg and ffprobe else None
     found = shutil.which(tool_id)
-    if found and tool_id == "deno" and not _deno_is_supported(found):
+    if found and tool_id == "deno" and not _deno_is_supported(found, cache_dir):
         return None
     return found
 
 
+def _deno_is_supported(path: str, cache_dir: Path | None) -> bool:
+    """yt-dlp needs Deno 2 or later; an older Deno on PATH doesn't count.
+
+    Running `deno --version` happens on the UI thread at start-up and can be
+    slow behind version-manager shims, so the answer is kept in the tools
+    folder and reused until that Deno file changes.
+    """
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return False
+    key = {"path": path, "mtime_ns": stat.st_mtime_ns, "size": stat.st_size}
+    cache_file = cache_dir / DENO_CHECK_NAME if cache_dir else None
+    try:
+        cached = json.loads(cache_file.read_text(encoding="utf-8")) if cache_file else {}
+    except (OSError, ValueError):
+        cached = {}
+    if isinstance(cached, dict) and all(cached.get(k) == v for k, v in key.items()):
+        return bool(cached.get("supported"))
+    supported = _run_deno_version(path, stat.st_mtime_ns, stat.st_size)
+    if cache_file:
+        try:
+            cache_file.parent.mkdir(parents=True, exist_ok=True)
+            cache_file.write_text(json.dumps({**key, "supported": supported}), encoding="utf-8")
+        except OSError:
+            pass  # Only a cache: checked again next time.
+    return supported
+
+
 @functools.cache
-def _deno_is_supported(path: str) -> bool:
-    """yt-dlp needs Deno 2 or later; an older Deno on PATH doesn't count."""
+def _run_deno_version(path: str, mtime_ns: int, size: int) -> bool:
     try:
         result = subprocess.run(
             [path, "--version"], capture_output=True, text=True, timeout=10,

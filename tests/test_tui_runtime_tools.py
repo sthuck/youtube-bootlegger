@@ -354,6 +354,26 @@ class TestSettingsSection:
             assert [url.split("/")[-1] for url in server.requests] == ["ffmpeg-1.0.zip"]
 
 
+async def test_saving_settings_mid_download_keeps_the_downloaded_ytdlp_default(
+    backend, tools_dir, server, monkeypatch
+):
+    """Saving Settings before yt-dlp arrives must not store "external off" for good."""
+    settings = AppSettings(backend, tools_dir=tools_dir)
+    fake_path(monkeypatch, {"ffmpeg", "ffprobe", "deno"})
+    server.hold()
+    app = make_app(settings, server)
+    async with app.run_test(size=SIZE) as pilot:
+        await wait_for(pilot, lambda: server.requests)
+        await pilot.press("f2")
+        await wait_for(pilot, lambda: isinstance(app.screen, SettingsScreen))
+        await pilot.press("ctrl+s")
+        await wait_for(pilot, lambda: not isinstance(app.screen, SettingsScreen))
+        server.release()
+        await wait_for(pilot, lambda: installed(settings, ("yt-dlp",)))
+        await wait_for(pilot, lambda: not banner_shown(app))
+    assert AppSettings(backend, tools_dir=tools_dir).use_external_ytdlp is True
+
+
 async def test_quit_cancels_running_download(settings, server, monkeypatch, tools_dir):
     fake_path(monkeypatch)
     server.hold()

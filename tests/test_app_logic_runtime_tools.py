@@ -90,6 +90,34 @@ def test_failure_offers_retry(server, settings, monkeypatch):
     assert session.start() == ["yt-dlp", "ffmpeg", "deno"]
 
 
+def test_failure_banner_goes_once_nothing_is_missing(server, settings, monkeypatch):
+    fake_path(monkeypatch)
+    session = RuntimeToolsSession(settings)
+    session.auto_download_ids()
+    session.on_failed("offline")
+    settings.ytdlp_path = "/opt/yt-dlp"  # the user installs the tools themselves
+    fake_path(monkeypatch, {"ffmpeg", "ffprobe", "deno"})
+    assert not session.banner().visible
+    assert session.auto_download_ids() == []
+    assert session.phase == ToolsPhase.IDLE
+
+    settings.ytdlp_path = ""  # later something is needed again: downloads by itself
+    assert session.auto_download_ids() == ["yt-dlp"]
+
+
+def test_view_looks_tools_up_once(server, settings, monkeypatch):
+    fake_path(monkeypatch)
+    session = RuntimeToolsSession(settings)
+    calls = []
+    real = settings.tool_statuses
+    monkeypatch.setattr(settings, "tool_statuses", lambda: calls.append(1) or real())
+    view = session.view()
+    assert len(calls) == 1
+    assert [s.tool_id for s in view.statuses] == ["yt-dlp", "ffmpeg", "deno"]
+    assert view.banner == session.banner()
+    assert view.start_blocked_reason == session.start_blocked_reason()
+
+
 def test_settings_change_that_needs_a_tool_starts_a_download(server, settings, monkeypatch):
     fake_path(monkeypatch, {"ffmpeg", "ffprobe", "deno"})
     install_fake_tools(settings.tools_dir, server, ["yt-dlp"])

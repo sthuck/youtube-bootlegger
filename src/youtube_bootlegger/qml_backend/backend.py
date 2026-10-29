@@ -300,9 +300,16 @@ class AppBackend(QObject):
         self._tools = ToolsBackend(
             self._app_settings, self._thread_pool, http_get=tools_http_get, parent=self
         )
+        # The external-yt-dlp default turns on once yt-dlp is downloaded.
+        self._tools.changed.connect(self._sync_use_external_ytdlp)
         self._tools.checkAutoDownload()
 
     # ── Private helpers ─────────────────────────────────────────────
+
+    def _sync_use_external_ytdlp(self):
+        self._emit(
+            "_use_external_ytdlp", self._app_settings.use_external_ytdlp, self.useExternalYtdlpChanged
+        )
 
     def _emit(self, attr, value, signal):
         if getattr(self, attr) != value:

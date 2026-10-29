@@ -34,6 +34,8 @@ uses tools on PATH or paths set in Settings, and says so when FFmpeg is missing.
   for a tool needs no network access and doesn't re-hash anything.
 - **Only what's needed.** See the table above. FFmpeg and ffprobe are one tool:
   yt-dlp expects ffprobe next to FFmpeg.
+  A Deno on PATH is checked with `deno --version` once per Deno file; the answer
+  is kept in `.deno-on-path.json` in the tools folder until that file changes.
 - **Safe installs.** Downloads go into a hidden `.staging-*` folder, are checked
   against the pinned size and SHA-256, and only the named executables are taken
   from each archive (no paths, links or duplicates). The finished folder is

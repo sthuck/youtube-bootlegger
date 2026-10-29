@@ -392,6 +392,23 @@ def test_saving_settings_downloads_what_is_now_missing(
     assert server.requests == [server.specs["ffmpeg"].assets[0].url]
 
 
+def test_saving_settings_mid_download_keeps_the_downloaded_ytdlp_default(
+    open_main_window, server, tools_dir, store, monkeypatch
+):
+    """Saving Settings before yt-dlp arrives must not store "external off" for good."""
+    fake_path(monkeypatch, {"ffmpeg", "ffprobe", "deno"})
+    server.hold()
+    window = open_main_window()
+    wait_until(lambda: server.requests)
+
+    in_settings(window, lambda dialog: None, save=True)
+
+    server.release()
+    wait_until(lambda: installed(tools_dir, "yt-dlp"), 5000)
+    wait_until(lambda: not banner_shown(window), 5000)
+    assert AppSettings(store, tools_dir=tools_dir).use_external_ytdlp is True
+
+
 def test_open_folder_disabled_without_tools_dir(widgets_app, monkeypatch):
     fake_path(monkeypatch, {"ffmpeg", "ffprobe"})
     dialog = SettingsDialog(settings=AppSettings(DictBackend()))

@@ -325,7 +325,11 @@ class SettingsDialog(QDialog):
 
     def _load_settings(self) -> None:
         """Populate the form from the current persisted settings."""
-        self._use_external_checkbox.setChecked(self._settings.use_external_ytdlp)
+        # Remembered so Save only stores the switch when the user changed it:
+        # its default turns on once yt-dlp is downloaded, which may happen
+        # while this dialog is open.
+        self._loaded_use_external = self._settings.use_external_ytdlp
+        self._use_external_checkbox.setChecked(self._loaded_use_external)
         self._ytdlp_path_input.setText(self._settings.ytdlp_path)
         self._ffmpeg_path_input.setText(self._settings.ffmpeg_path)
         self._ytdlp_path_input.setEnabled(self._settings.use_external_ytdlp)
@@ -360,7 +364,8 @@ class SettingsDialog(QDialog):
 
     def _on_save(self) -> None:
         """Persist the form values and close the dialog."""
-        self._settings.use_external_ytdlp = self._use_external_checkbox.isChecked()
+        if self._use_external_checkbox.isChecked() != self._loaded_use_external:
+            self._settings.use_external_ytdlp = self._use_external_checkbox.isChecked()
         self._settings.ytdlp_path = self._ytdlp_path_input.text()
         self._settings.ffmpeg_path = self._ffmpeg_path_input.text()
         selected_browser = self._cookies_browser_combo.currentData()

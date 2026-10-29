@@ -69,6 +69,7 @@ Item {
                     Behavior on color { ColorAnimation { duration: 150 } }
 
                     Rectangle {
+                        objectName: "externalYtdlpKnob"
                         width: 18; height: 18; radius: 9
                         color: "white"
                         anchors.verticalCenter: parent.verticalCenter

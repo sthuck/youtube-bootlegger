@@ -113,6 +113,9 @@ class SettingsScreen(ModalScreen[bool]):
         super().__init__()
         self._settings = settings
         self._tools = tools
+        # Save only stores the switch when the user changed it: its default
+        # turns on once yt-dlp is downloaded, maybe while this screen is open.
+        self._loaded_use_external = settings.use_external_ytdlp
 
     def compose(self) -> ComposeResult:
         s = self._settings
@@ -129,7 +132,7 @@ class SettingsScreen(ModalScreen[bool]):
 
                 yield Static("EXTERNAL TOOLS", classes="section-title")
                 with Horizontal(classes="switch-row"):
-                    yield Switch(s.use_external_ytdlp, id="setting-use-external-ytdlp")
+                    yield Switch(self._loaded_use_external, id="setting-use-external-ytdlp")
                     yield Label("Use external yt-dlp executable")
                 for field in TOOL_FIELDS:
                     yield from _field_widgets(field, s)
@@ -213,7 +216,9 @@ class SettingsScreen(ModalScreen[bool]):
 
     def action_save(self) -> None:
         s = self._settings
-        s.use_external_ytdlp = self.query_one("#setting-use-external-ytdlp", Switch).value
+        use_external = self.query_one("#setting-use-external-ytdlp", Switch).value
+        if use_external != self._loaded_use_external:
+            s.use_external_ytdlp = use_external
         s.cookies_from_browser = self.query_one("#setting-cookies-from-browser", Select).value
         s.llm_provider = self.query_one("#setting-llm-provider", Select).value
         s.auto_find_tracklist = self.query_one("#setting-auto-find-tracklist", Switch).value

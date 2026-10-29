@@ -157,7 +157,8 @@ class ToolsBackend(QObject):
         self._refresh()
 
     def _refresh(self):
-        banner = self._session.banner()
+        view = self._session.view()  # one tool lookup per refresh
+        banner = view.banner
         downloading = self._session.downloading
         if banner.progress is not None:
             progress = banner.progress
@@ -170,10 +171,10 @@ class ToolsBackend(QObject):
             "bannerIsError": banner.is_error,
             "bannerProgress": progress,
             "downloading": downloading,
-            "startBlockedReason": self._session.start_blocked_reason() or "",
+            "startBlockedReason": view.start_blocked_reason or "",
             "statuses": [
                 {"id": s.tool_id, "label": s.label, "text": status_text(s)}
-                for s in self._session.statuses()
+                for s in view.statuses
             ],
             "canOpenFolder": self._settings.tools_dir is not None,
         }

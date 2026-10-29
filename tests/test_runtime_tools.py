@@ -113,6 +113,27 @@ def test_network_error_is_reported(server, tools_dir):
         install_tools(["deno"], ToolStore(tools_dir, server.specs), http_get=server.http_get)
 
 
+def test_connection_closed_mid_download_is_reported(server, tools_dir):
+    import http.client
+    server.error = http.client.IncompleteRead(b"partial", 100)
+    with pytest.raises(ToolInstallError, match="Could not download Deno: IncompleteRead"):
+        install_tools(["deno"], ToolStore(tools_dir, server.specs), http_get=server.http_get)
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32" or getattr(__import__("os"), "geteuid", lambda: 1)() == 0,
+    reason="POSIX permissions; root can write anywhere",
+)
+def test_unwritable_tools_folder_fails_instead_of_waiting(server, tools_dir):
+    tools_dir.mkdir(parents=True)
+    tools_dir.chmod(0o500)
+    try:
+        with pytest.raises(ToolInstallError, match="Could not write to"):
+            install_tools(["deno"], ToolStore(tools_dir, server.specs), http_get=server.http_get)
+    finally:
+        tools_dir.chmod(0o700)
+
+
 def test_oversized_download_is_stopped(server, tools_dir):
     url = server.specs["deno"].assets[0].url
     server.payloads[url] += b"\0" * 10
@@ -282,17 +303,37 @@ def test_ffmpeg_without_ffprobe_on_path_is_missing(server, tools_dir, monkeypatc
 
 
 @pytest.mark.parametrize("version,counts", [("deno 1.46.3 (stable)", False), ("deno 2.1.0", True)])
-def test_deno_on_path_must_be_version_2(server, tools_dir, monkeypatch, version, counts):
-    monkeypatch.setattr(shutil, "which", lambda cmd, *a, **k: "/opt/deno" if cmd == "deno" else None)
+def test_deno_on_path_must_be_version_2(server, tools_dir, monkeypatch, tmp_path, version, counts):
+    deno = tmp_path / "bin" / "deno"
+    deno.parent.mkdir()
+    deno.write_bytes(b"deno")
+    monkeypatch.setattr(shutil, "which", lambda cmd, *a, **k: str(deno) if cmd == "deno" else None)
     monkeypatch.setattr(
         tools.subprocess, "run",
         MagicMock(return_value=subprocess.CompletedProcess([], 0, version + "\n", "")),
     )
-    tools._deno_is_supported.cache_clear()
-    try:
-        assert _status(settings_with(tools_dir), "deno").needs_download is not counts
-    finally:
-        tools._deno_is_supported.cache_clear()
+    tools._run_deno_version.cache_clear()
+    assert _status(settings_with(tools_dir), "deno").needs_download is not counts
+
+
+def test_deno_version_is_checked_once_per_binary(server, tools_dir, monkeypatch, tmp_path):
+    """`deno --version` runs on the UI thread at start-up; later starts reuse the answer."""
+    deno = tmp_path / "bin" / "deno"
+    deno.parent.mkdir()
+    deno.write_bytes(b"deno")
+    monkeypatch.setattr(shutil, "which", lambda cmd, *a, **k: str(deno) if cmd == "deno" else None)
+    run = MagicMock(return_value=subprocess.CompletedProcess([], 0, "deno 2.1.0\n", ""))
+    monkeypatch.setattr(tools.subprocess, "run", run)
+    tools._run_deno_version.cache_clear()
+    assert not _status(settings_with(tools_dir), "deno").needs_download
+    tools._run_deno_version.cache_clear()  # as after a restart
+    assert not _status(settings_with(tools_dir), "deno").needs_download
+    assert run.call_count == 1
+
+    deno.write_bytes(b"a different deno")  # upgraded: checked again
+    run.return_value = subprocess.CompletedProcess([], 0, "deno 1.40.0\n", "")
+    assert _status(settings_with(tools_dir), "deno").needs_download
+    assert run.call_count == 2
 
 
 def test_downloaded_tools_win_over_path_and_custom_paths_win_over_both(server, tools_dir, monkeypatch):
@@ -327,6 +368,16 @@ def installed(server, tools_dir, monkeypatch):
     fake_path(monkeypatch)
     install_fake_tools(tools_dir, server)
     return settings_with(tools_dir)
+
+
+def test_ytdlp_from_path_is_not_given_js_runtimes(server, tools_dir, monkeypatch):
+    """Deno downloaded but yt-dlp not yet: the PATH yt-dlp may be too old for the flag."""
+    fake_path(monkeypatch, {"yt-dlp"})
+    install_fake_tools(tools_dir, server, ["deno", "ffmpeg"])
+    settings = settings_with(tools_dir)
+    settings.use_external_ytdlp = True
+    assert settings.resolved_ytdlp_command() == "yt-dlp"
+    assert "--js-runtimes" not in settings.ytdlp_tool_cli_args()
 
 
 def test_custom_ytdlp_is_not_given_js_runtimes(installed):
