@@ -8,7 +8,6 @@ from PySide6.QtWidgets import QApplication
 
 from src.youtube_bootlegger.core.settings import AppSettings
 from src.youtube_bootlegger.qml_backend import AppBackend
-from src.youtube_bootlegger.qml_backend import backend as backend_module
 from src.youtube_bootlegger.workers import pipeline_worker as pipeline_worker_module
 from src.youtube_bootlegger.workers import tracklist_find_worker as find_worker_module
 from src.youtube_bootlegger.workers import video_info_worker as video_worker_module
@@ -20,6 +19,7 @@ from tests.qml_support import (
     make_video,
     open_window,
 )
+from tests.tools_support import fake_path
 
 
 @pytest.fixture(scope="session")
@@ -42,7 +42,7 @@ def app_settings(settings_store):
 
 @pytest.fixture
 def ffmpeg_available(monkeypatch):
-    monkeypatch.setattr(backend_module, "is_ffmpeg_available", lambda cmd: True)
+    fake_path(monkeypatch, {"ffmpeg", "ffprobe"})
 
 
 @pytest.fixture

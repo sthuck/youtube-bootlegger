@@ -1,6 +1,11 @@
 """Settings dialog: external tools and AI assist provider."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+from rich.text import Text
 
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -8,7 +13,15 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, Select, Static, Switch
 
-from ...app_logic import AI_PROVIDERS_NOTE, LOG_AI_REQUESTS_LABEL, log_ai_requests_note
+from ...app_logic import (
+    AI_PROVIDERS_NOTE,
+    FFMPEG_PATH_PLACEHOLDER,
+    LOG_AI_REQUESTS_LABEL,
+    TOOLS_SECTION_TITLE,
+    YTDLP_PATH_PLACEHOLDER,
+    log_ai_requests_note,
+    status_text,
+)
 from ...app_logic.track_finder import AUTO_FIND_SETTING_LABEL, AUTO_FIND_SETTING_NOTE
 from ...core.settings import (
     COOKIE_BROWSER_OPTIONS,
@@ -22,7 +35,11 @@ from ...llm import (
     DEFAULT_OPENAI_MODEL,
     DEFAULT_VERTEX_MODEL,
 )
+from ...core.tools import ToolSource, tool_status
 from ...utils import is_ffmpeg_available
+
+if TYPE_CHECKING:
+    from ..runtime_tools import ToolsDownloader
 
 PROVIDER_OPTIONS = (
     ("Lite (ChatGPT in browser, no API key)", LlmProvider.CHATGPT_LITE),
@@ -63,9 +80,11 @@ PROVIDER_FIELDS: dict[LlmProvider, tuple[SettingField, ...]] = {
 }
 
 TOOL_FIELDS = (
-    SettingField("ytdlp_path", "yt-dlp path", 'Leave empty to use bundled yt-dlp, then PATH'),
-    SettingField("ffmpeg_path", "ffmpeg path", 'Leave empty to use bundled FFmpeg, then PATH'),
+    SettingField("ytdlp_path", "yt-dlp path", YTDLP_PATH_PLACEHOLDER),
+    SettingField("ffmpeg_path", "ffmpeg path", FFMPEG_PATH_PLACEHOLDER),
 )
+
+NO_TOOLS_FOLDER_NOTE = "No folder for downloaded tools: downloads are turned off."
 
 
 def _input_id(field: SettingField) -> str:
@@ -90,15 +109,24 @@ class SettingsScreen(ModalScreen[bool]):
         Binding("ctrl+s", "save", "Save"),
     ]
 
-    def __init__(self, settings: AppSettings) -> None:
+    def __init__(self, settings: AppSettings, tools: ToolsDownloader | None = None) -> None:
         super().__init__()
         self._settings = settings
+        self._tools = tools
 
     def compose(self) -> ComposeResult:
         s = self._settings
         with Vertical(id="settings-dialog", classes="dialog"):
             yield Static("Settings", classes="dialog-title")
             with VerticalScroll(id="settings-body"):
+                if self._tools is not None:
+                    yield Static(TOOLS_SECTION_TITLE.upper(), classes="section-title")
+                    yield Static("", id="tools-statuses")
+                    yield Static(self._tools_folder_text(), id="tools-folder", classes="muted")
+                    with Horizontal(id="tools-buttons"):
+                        yield Button("Download missing", id="tools-download-missing")
+                        yield Button("Verify", id="tools-verify")
+
                 yield Static("EXTERNAL TOOLS", classes="section-title")
                 with Horizontal(classes="switch-row"):
                     yield Switch(s.use_external_ytdlp, id="setting-use-external-ytdlp")
@@ -143,6 +171,7 @@ class SettingsScreen(ModalScreen[bool]):
     def on_mount(self) -> None:
         self._show_provider_fields(self._settings.llm_provider)
         self._refresh_ffmpeg_warning(self._settings.ffmpeg_path)
+        self.refresh_tools()
         self.query_one("#cookies-browser-info", Static).tooltip = COOKIE_BROWSER_TOOLTIP
         self.query_one("#setting-cookies-from-browser", Select).tooltip = COOKIE_BROWSER_TOOLTIP
 
@@ -156,10 +185,31 @@ class SettingsScreen(ModalScreen[bool]):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         event.stop()
-        if event.button.id == "settings-save":
+        button_id = event.button.id
+        if button_id == "settings-save":
             self.action_save()
-        else:
+        elif button_id == "settings-cancel":
             self.dismiss(False)
+        elif self._tools is not None and button_id == "tools-download-missing":
+            self._tools.start()
+        elif self._tools is not None and button_id == "tools-verify":
+            self._tools.start(verify=True)
+
+    def refresh_tools(self) -> None:
+        """Re-render tool statuses; the app calls this when a download changes."""
+        if self._tools is None:
+            return
+        session = self._tools.session
+        lines = Text()
+        for status in session.statuses():
+            if lines:
+                lines.append("\n")
+            lines.append(f"{status.label}: ", style="bold")
+            lines.append(status_text(status))
+        self.query_one("#tools-statuses", Static).update(lines)
+        for button_id in ("#tools-download-missing", "#tools-verify"):
+            self.query_one(button_id, Button).disabled = session.downloading
+        self._refresh_ffmpeg_warning(self.query_one("#setting-ffmpeg-path", Input).value)
 
     def action_save(self) -> None:
         s = self._settings
@@ -178,7 +228,16 @@ class SettingsScreen(ModalScreen[bool]):
         for container in self.query(".provider-fields"):
             container.display = container.id == f"provider-{provider}"
 
+    def _tools_folder_text(self) -> Text:
+        folder = self._settings.tools_dir
+        return Text(f"Downloaded tools folder: {folder}" if folder else NO_TOOLS_FOLDER_NOTE)
+
     def _refresh_ffmpeg_warning(self, path: str) -> None:
-        command = path.strip() or "ffmpeg"
-        warning = "" if is_ffmpeg_available(command) else "FFmpeg not found at this location"
-        self.query_one("#ffmpeg-warning", Static).update(warning)
+        command = path.strip()
+        if command:
+            warning = "" if is_ffmpeg_available(command) else "FFmpeg not found at this location"
+        else:
+            # Empty means "downloaded copy, then PATH": ask the same lookup Start uses.
+            status = tool_status("ffmpeg", self._settings.tool_store)
+            warning = status_text(status) if status.source == ToolSource.MISSING else ""
+        self.query_one("#ffmpeg-warning", Static).update(Text(warning))

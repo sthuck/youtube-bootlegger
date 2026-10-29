@@ -28,6 +28,7 @@ from src.youtube_bootlegger.tui.screens import (
 )
 from src.youtube_bootlegger.tui.screens.help import build_help_markdown
 from src.youtube_bootlegger.tui.widgets import StatusLog, TrackPreviewTable
+from tests.tools_support import fake_path
 
 VALID_URL = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 SIZE = (140, 45)
@@ -125,7 +126,7 @@ def fake_video(monkeypatch):
         return make_video()
 
     monkeypatch.setattr(app_module, "fetch_video_info", fetch)
-    monkeypatch.setattr(app_module, "is_ffmpeg_available", lambda cmd: True)
+    fake_path(monkeypatch, {"ffmpeg", "ffprobe"})
     monkeypatch.setattr(app_module, "URL_DEBOUNCE_SECONDS", 0.01)
     return calls
 

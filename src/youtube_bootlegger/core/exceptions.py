@@ -27,3 +27,7 @@ class FFmpegNotFoundError(YouTubeBootleggerError):
 
 class OperationCancelledError(YouTubeBootleggerError):
     """The user cancelled a running download or split."""
+
+
+class ToolInstallError(YouTubeBootleggerError):
+    """Downloading or unpacking a runtime tool failed."""

@@ -34,6 +34,7 @@ from src.youtube_bootlegger.workers import (
     VideoInfoWorker,
 )
 from tests.test_downloader import make_settings
+from tests.tools_support import fake_path
 
 URL = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 OTHER_URL = "https://www.youtube.com/watch?v=jNQXAC9IVRw"
@@ -111,11 +112,10 @@ def settings():
 
 @pytest.fixture
 def window(widgets_app, settings, monkeypatch):
-    monkeypatch.setattr(main_window_module, "get_settings", lambda: settings)
-    monkeypatch.setattr(main_window_module, "is_ffmpeg_available", lambda _command: True)
+    fake_path(monkeypatch, {"ffmpeg", "ffprobe"})
     monkeypatch.setattr(main_window_module, "QMessageBox", FakeMessageBox)
     FakeMessageBox.shown = []
-    window = main_window_module.MainWindow()
+    window = main_window_module.MainWindow(settings=settings)
     window._thread_pool = FakePool()
     yield window
     window.deleteLater()
@@ -367,7 +367,14 @@ def test_saving_settings_preserves_invalid_url_error(window, settings, monkeypat
     window._url_input.set_error("Invalid YouTube URL")
 
     class AcceptedDialog:
-        def __init__(self, parent=None):
+        tools_download_requested = tools_verify_requested = type(
+            "FakeSignal", (), {"connect": lambda self, slot: None}
+        )()
+
+        def __init__(self, parent=None, settings=None):
+            pass
+
+        def deleteLater(self):
             pass
 
         def exec(self):

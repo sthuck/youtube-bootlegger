@@ -30,6 +30,7 @@ class DirectoryPickerWidget(QWidget):
         row_layout = QHBoxLayout()
 
         self._input = QLineEdit()
+        self._input.setObjectName("dirField")
         self._input.setPlaceholderText("Select output directory...")
         self._input.setText(str(Path.home() / "Music"))
         row_layout.addWidget(self._input)

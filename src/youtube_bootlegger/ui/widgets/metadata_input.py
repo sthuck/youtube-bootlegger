@@ -36,6 +36,7 @@ class MetadataInputWidget(QWidget):
         layout.addWidget(artist_label)
 
         self._artist_input = QLineEdit()
+        self._artist_input.setObjectName("artistField")
         self._artist_input.setPlaceholderText("Enter artist name")
         layout.addWidget(self._artist_input)
 

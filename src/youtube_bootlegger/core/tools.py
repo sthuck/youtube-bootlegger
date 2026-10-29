@@ -1,37 +1,184 @@
-"""Locate release executables without relying on the working directory.
+"""Find runtime tools: a user path, a downloaded copy, or the system PATH.
 
-Nuitka onefile keeps sys.argv[0] pointing at the original executable, whereas
-__file__ of __main__ points into its temporary extraction directory. Windows
-embeds tools there; Linux uses sidecars and macOS keeps tools inside the .app.
+Downloads live in a per-user data folder (see default_tools_dir), one folder
+per tool and pinned version: <root>/<tool>/<install key>/. A folder counts as
+installed only once its installed.json marker exists, which the installer
+writes last, so a cancelled or crashed download is never picked up.
 """
 
+import functools
+import hashlib
+import json
 import os
+import re
+import shutil
+import subprocess
 import sys
+from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 
+from .tool_manifest import TOOL_LABELS, ToolSpec, tool_specs
 
-def bundled_tools_dir() -> Path:
-    """Return extracted Windows tools, Linux sidecars, or macOS Resources."""
-    if sys.platform == "win32" and "__compiled__" in globals():
-        main_file = getattr(sys.modules.get("__main__"), "__file__", None)
-        if main_file:
-            return Path(main_file).resolve().parent / "tools"
-    executable_dir = Path(sys.argv[0]).resolve().parent
-    if executable_dir.name == "MacOS" and executable_dir.parent.name == "Contents":
-        return executable_dir.parent / "Resources" / "tools"
-    return executable_dir / "tools"
+MARKER_NAME = "installed.json"
+MIN_DENO_MAJOR = 2
 
 
-def bundled_tool(name: str) -> Path | None:
-    suffix = ".exe" if sys.platform == "win32" else ""
-    candidate = bundled_tools_dir() / f"{name}{suffix}"
-    if candidate.is_file() and os.access(candidate, os.X_OK):
-        return candidate
-    return None
+def exe_name(name: str) -> str:
+    return f"{name}.exe" if sys.platform == "win32" else name
 
 
-def resolve_tool(name: str, override: str = "") -> str:
-    """Prefer a user override, then a bundled executable, then PATH lookup."""
-    if override:
-        return override
-    return str(bundled_tool(name) or name)
+def default_tools_dir() -> Path:
+    """Per-user folder for downloaded tools.
+
+    Windows: %LOCALAPPDATA%\\YouTubeBootlegger\\tools (not roaming: these are
+    large, machine-specific binaries). Linux and macOS: $XDG_DATA_HOME, or
+    ~/.local/share, then youtube-bootlegger/tools.
+    """
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
+        return Path(base) / "YouTubeBootlegger" / "tools"
+    xdg = os.environ.get("XDG_DATA_HOME", "")
+    # The XDG spec says relative paths are invalid and must be ignored.
+    base = Path(xdg) if os.path.isabs(xdg) else Path.home() / ".local" / "share"
+    return base / "youtube-bootlegger" / "tools"
+
+
+def file_sha256(path: Path) -> str:
+    with path.open("rb") as source:
+        return hashlib.file_digest(source, "sha256").hexdigest()
+
+
+class ToolStore:
+    """Downloaded tools under one root folder. A None root holds nothing."""
+
+    def __init__(self, root: Path | None, specs: dict[str, ToolSpec] | None = None):
+        self.root = root
+        self.specs = tool_specs() if specs is None else specs
+
+    def install_dir(self, spec: ToolSpec) -> Path | None:
+        if self.root is None:
+            return None
+        return self.root / spec.tool_id / spec.install_key
+
+    def is_installed(self, tool_id: str) -> bool:
+        spec = self.specs.get(tool_id)
+        directory = self.install_dir(spec) if spec else None
+        if directory is None:
+            return False
+        return (directory / MARKER_NAME).is_file() and all(
+            (directory / exe_name(name)).is_file() for name in spec.executables
+        )
+
+    def executable(self, name: str) -> Path | None:
+        """Path of a downloaded executable such as "ffprobe", if installed."""
+        for spec in self.specs.values():
+            if name in spec.executables and self.is_installed(spec.tool_id):
+                return self.install_dir(spec) / exe_name(name)
+        return None
+
+    def verify(self, tool_id: str) -> bool:
+        """Re-hash an installed tool and remove it if any file changed.
+
+        Returns False when the tool is not installed (any more).
+        """
+        if not self.is_installed(tool_id):
+            return False
+        directory = self.install_dir(self.specs[tool_id])
+        try:
+            recorded = json.loads((directory / MARKER_NAME).read_text(encoding="utf-8"))["files"]
+            intact = all(file_sha256(directory / name) == digest for name, digest in recorded.items())
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            intact = False
+        if not intact:
+            shutil.rmtree(directory, ignore_errors=True)
+        return intact
+
+    def remove_other_versions(self, tool_id: str) -> None:
+        """Delete folders of older pins. Files still in use are left for next time."""
+        spec = self.specs.get(tool_id)
+        current = self.install_dir(spec) if spec else None
+        if current is None or not current.parent.is_dir():
+            return
+        for entry in current.parent.iterdir():
+            if entry != current and entry.is_dir():
+                shutil.rmtree(entry, ignore_errors=True)
+
+
+class ToolSource(StrEnum):
+    CUSTOM = "custom"  # a path set in Settings
+    DOWNLOADED = "downloaded"
+    SYSTEM = "system"  # found on PATH
+    MISSING = "missing"
+
+
+@dataclass(frozen=True)
+class ToolStatus:
+    """Where a tool comes from right now.
+
+    Attributes:
+        tool_id: "yt-dlp", "ffmpeg" or "deno".
+        label: Name shown to users.
+        source: Which lookup step found it.
+        path: The executable in use, or None when missing.
+        needs_download: True if the downloader should fetch it.
+        downloadable: True if this platform has a pinned download.
+    """
+
+    tool_id: str
+    label: str
+    source: ToolSource
+    path: str | None
+    needs_download: bool
+    downloadable: bool
+
+
+def tool_status(
+    tool_id: str, store: ToolStore, *, custom_path: str = "", use_path: bool = True
+) -> ToolStatus:
+    """Resolve one tool: custom path, then the download, then PATH.
+
+    Args:
+        custom_path: The user's override from Settings, if any.
+        use_path: Whether a copy on PATH saves the download. yt-dlp passes
+            False: the app always fetches its own pinned copy, using the
+            PATH one only until that arrives.
+    """
+    label = TOOL_LABELS[tool_id]
+    downloadable = tool_id in store.specs and store.root is not None
+    if custom_path:
+        return ToolStatus(tool_id, label, ToolSource.CUSTOM, custom_path, False, downloadable)
+    downloaded = store.executable(tool_id)
+    if downloaded:
+        return ToolStatus(tool_id, label, ToolSource.DOWNLOADED, str(downloaded), False, downloadable)
+    system = _on_path(tool_id)
+    if system:
+        return ToolStatus(
+            tool_id, label, ToolSource.SYSTEM, system, downloadable and not use_path, downloadable
+        )
+    return ToolStatus(tool_id, label, ToolSource.MISSING, None, downloadable, downloadable)
+
+
+def _on_path(tool_id: str) -> str | None:
+    if tool_id == "ffmpeg":
+        # yt-dlp looks for ffprobe beside FFmpeg; a lone ffmpeg isn't enough.
+        ffmpeg, ffprobe = shutil.which("ffmpeg"), shutil.which("ffprobe")
+        return ffmpeg if ffmpeg and ffprobe else None
+    found = shutil.which(tool_id)
+    if found and tool_id == "deno" and not _deno_is_supported(found):
+        return None
+    return found
+
+
+@functools.cache
+def _deno_is_supported(path: str) -> bool:
+    """yt-dlp needs Deno 2 or later; an older Deno on PATH doesn't count."""
+    try:
+        result = subprocess.run(
+            [path, "--version"], capture_output=True, text=True, timeout=10,
+            stdin=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    match = re.match(r"deno (\d+)\.", result.stdout or "")
+    return bool(match) and int(match.group(1)) >= MIN_DENO_MAJOR

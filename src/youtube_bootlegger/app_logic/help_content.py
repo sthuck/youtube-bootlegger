@@ -139,8 +139,8 @@ def build_help_content() -> dict:
         ),
         "requirementsTitle": "REQUIREMENTS",
         "requirements": [
-            "FFmpeg — included in release downloads. Source checkouts need a system install.",
-            "yt-dlp and Deno — included in release downloads. Custom tool paths are optional in Settings.",
+            "FFmpeg, yt-dlp and Deno — downloaded automatically on first start "
+            "(FFmpeg and Deno already on PATH are used instead). Custom paths are optional in Settings.",
             "AI provider — optional, only needed for AI Assist. Finding track lists "
             "needs an API model; ChatGPT Lite can only detect the format.",
         ],

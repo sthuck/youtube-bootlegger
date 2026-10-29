@@ -1,6 +1,6 @@
 """Settings dialog for configuring external tool paths and LLM providers."""
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from ...app_logic import AI_PROVIDERS_NOTE, LOG_AI_REQUESTS_LABEL, log_ai_requests_note
+from ...app_logic.runtime_tools import FFMPEG_PATH_PLACEHOLDER, YTDLP_PATH_PLACEHOLDER
 from ...app_logic.track_finder import AUTO_FIND_SETTING_LABEL, AUTO_FIND_SETTING_NOTE
 from ...llm import (
     DEFAULT_ANTHROPIC_MODEL,
@@ -37,6 +38,7 @@ from ...core.settings import (
     LlmProvider,
     get_settings,
 )
+from .tools_settings_group import ToolsSettingsGroup
 
 
 PREFERRED_HEIGHT = 640
@@ -44,7 +46,14 @@ MIN_HEIGHT = 320
 
 
 class SettingsDialog(QDialog):
-    """Modal dialog for editing persisted application settings."""
+    """Modal dialog for editing persisted application settings.
+
+    The runtime tools section only asks for downloads (tools_download_requested,
+    tools_verify_requested); the main window runs them and calls refresh_tools().
+    """
+
+    tools_download_requested = Signal()
+    tools_verify_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None, settings: AppSettings | None = None):
         super().__init__(parent)
@@ -54,7 +63,14 @@ class SettingsDialog(QDialog):
         self.setMinimumHeight(MIN_HEIGHT)
         self._setup_ui()
         self._load_settings()
+        self.refresh_tools()
         self._fit_to_screen()
+
+    def refresh_tools(self, downloading: bool = False) -> None:
+        """Re-read where each tool comes from; disable downloads while one runs."""
+        self._tools_group.refresh(
+            self._settings.tool_statuses(), self._settings.tools_dir, downloading
+        )
 
     def _fit_to_screen(self) -> None:
         """Open at a comfortable height that never exceeds the screen.
@@ -91,13 +107,13 @@ class SettingsDialog(QDialog):
 
         self._ytdlp_path_input, ytdlp_row = self._make_path_row(
             "Select yt-dlp executable",
-            placeholder='Leave empty to use bundled yt-dlp, then PATH',
+            placeholder=YTDLP_PATH_PLACEHOLDER,
         )
         tools_form.addRow("yt-dlp path:", ytdlp_row)
 
         self._ffmpeg_path_input, ffmpeg_row = self._make_path_row(
             "Select ffmpeg executable",
-            placeholder='Leave empty to use bundled FFmpeg, then PATH',
+            placeholder=FFMPEG_PATH_PLACEHOLDER,
         )
         tools_form.addRow("ffmpeg path:", ffmpeg_row)
 
@@ -120,6 +136,11 @@ class SettingsDialog(QDialog):
         tools_form.addRow(cookies_label_widget, self._cookies_browser_combo)
 
         layout.addWidget(tools_group)
+
+        self._tools_group = ToolsSettingsGroup()
+        self._tools_group.download_requested.connect(self.tools_download_requested)
+        self._tools_group.verify_requested.connect(self.tools_verify_requested)
+        layout.addWidget(self._tools_group)
 
         llm_group = QGroupBox("AI Assistant")
         llm_layout = QVBoxLayout(llm_group)

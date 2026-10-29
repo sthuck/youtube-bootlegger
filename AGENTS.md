@@ -30,6 +30,7 @@ uv run python main_tui.py
 - `core/ytdlp_metadata.py` is the only place that asks yt-dlp for metadata (bundled library or external executable per settings); `fetch_video_info` builds on it and returns description, chapters and (with `comment_limit`) comments from a single request. Track-source plans are in `docs/video-track-sources-investigation.md`.
 - AI track-list finder: `llm/track_finder.py` asks the API model for a list and validates every entry against the source text; `app_logic/track_finder.py` holds everything the UIs show or decide (button mode, auto-run, hint, log/banner strings) and `TrackFinderSession`, the per-window state (request tokens, cache, Undo). Front-ends only wire events to it.
 - `ui/` (widgets), `qml/` + `qml_backend/` (QML), `tui/` (Textual) are the three front-ends.
+- Runtime tools (yt-dlp, FFmpeg + ffprobe, Deno) are downloaded on first run, not shipped: `core/tool_manifest.py` pins URLs and SHA-256s per platform, `core/tools.py` finds tools (Settings path, then the download, then PATH) in the per-user data folder, `core/tool_installer.py` downloads/verifies/unpacks under a lock, and `app_logic/runtime_tools.py` (`RuntimeToolsSession`) holds the banner, auto-download and Start-gating decisions for all UIs. `AppSettings(backend, tools_dir=...)`: in-memory backends get `tools_dir=None`, so tests never use the real folder or the network unless they pass a temporary one. See `docs/runtime-tools.md`.
 - `llm/request_log.py`: Settings → "Log AI requests" wraps `http_post` in both AI calls and appends each request/response (credentials redacted) to `ai-requests.log` next to the settings file. `AppSettings.ai_request_log_path` is None for test backends, so tests never write to the real config folder.
 - `llm/chatgpt_lite.py` takes injectable `open_url`/`copy_text` callables; Qt implementations are the default, the TUI passes its own.
 
@@ -55,7 +56,7 @@ QML test infrastructure lives in `tests/qml_support.py` (helpers, fakes) and `te
 
 - `qml_harness` yields `(window, backend, app_settings)`. Settings are an in-memory `DictBackend`, so tests never touch the real config; the network is faked (`fake_video`); the debounce is 10 ms. The fixture **fails the test if any QML warning was logged**, captured with a message handler installed before `engine.load()`.
 - Use `open_window(backend)` when a test needs its own window (a custom backend, or a "restart" that reloads the same `settings_store`).
-- Fakes sit only at external boundaries: `fetch_video_info` (`fake_video`, or `gated_fetch` for ordering control), `DownloadSplitPipeline` (`fake_pipeline`), HTTP for AI Assist (`use_ai_http` injects `http_post` into `TracklistAiWorker`), `launch_chatgpt_lite_assist`, `is_ffmpeg_available`. Don't patch backend internals.
+- Fakes sit only at external boundaries: `fetch_video_info` (`fake_video`, or `gated_fetch` for ordering control), `DownloadSplitPipeline` (`fake_pipeline`), HTTP for AI Assist (`use_ai_http` injects `http_post` into `TracklistAiWorker`), `launch_chatgpt_lite_assist`, and runtime tools via `tests/tools_support.py` (`use_fake_tools` replaces the pinned manifest with tiny archives served by a `FakeToolServer` passed as `tools_http_get`; `fake_path` sets which tools are on PATH). Don't patch backend internals.
 
 ### Guidelines for new tests
 
@@ -74,7 +75,7 @@ QML test infrastructure lives in `tests/qml_support.py` (helpers, fakes) and `te
 ### Key caveats
 
 - **PySide6 system libraries**: The Qt xcb platform plugin requires system packages `libegl1`, `libopengl0`, `libxcb-cursor0`, `libxkbcommon-x11-0`, `libxcb-xkb1`, `libxcb-xinerama0`, `libxcb-icccm4`, `libxcb-image0`, `libxcb-keysyms1`, `libxcb-render-util0`, and `libxcb-shape0`. These are installed in the VM snapshot and should persist. If `libqxcb.so` fails to load, run `ldd` on it to find missing shared libs.
-- **FFmpeg**: Required at runtime for audio splitting (`shutil.which("ffmpeg")` is used). Pre-installed in the VM.
+- **FFmpeg**: Required at runtime for audio splitting. A source checkout uses FFmpeg on PATH (pre-installed in the VM) until the app downloads its own. Run the real-download test with `RUNTIME_TOOLS_E2E=1 uv run pytest tests/test_runtime_tools.py -k real_tools`.
 - **No linter configured**: The project does not include a linter (ruff, flake8, pylint, etc.) in its dev dependencies or `pyproject.toml`. Pytest is the only dev tool for validation.
 - **QML worker lifetime**: `AppBackend` holds every in-flight `VideoInfoWorker` until it reports back, and drops superseded results with a request id. Don't rely on replacing the worker attribute to drop old results. That frees the signals object while its thread can still emit on it.
 - **QML text fields**: keep one sync path (`text: backend.x` plus `onTextChanged` with an equality guard). Backend setters must store text as typed. Normalise (strip) when building the job, otherwise the value written back into the field fights the user's typing.

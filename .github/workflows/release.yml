@@ -51,12 +51,6 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
-      - name: Prepare Windows onefile payload
-        if: runner.os == 'Windows'
-        run: |
-          python scripts/bundle_tools.py --platform windows-x64 --destination "${{ runner.temp }}/runtime-tools"
-          python scripts/prepare_windows_onefile.py --tools-dir "${{ runner.temp }}/runtime-tools" --config-file "${{ runner.temp }}/runtime-tools.nuitka-package.config.yml"
-
       - name: Build executable with pyside6-deploy
         run: uv run pyside6-deploy main.py --force -v
 
@@ -88,27 +82,12 @@ jobs:
             Write-Host "Staged executable from $exe"
           }
 
-      # Linux sidecars and macOS Resources are staged after compilation. Windows
-      # tools were declared as executable dependencies inside its onefile payload.
-      - name: Bundle runtime executables (Linux)
-        if: runner.os == 'Linux'
-        run: python scripts/bundle_tools.py --platform ${{ matrix.platform }} --destination tools
-
-      - name: Bundle runtime executables (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          python scripts/bundle_tools.py --platform macos-arm64 --destination YouTubeBootlegger.app/Contents/Resources/tools
-          # Refresh the outer bundle's seal after adding Resources. Do not use
-          # --deep: Deno needs to retain its own signing entitlements for V8/JIT.
-          codesign --force --sign - --preserve-metadata=entitlements YouTubeBootlegger.app
-          codesign --verify --deep --strict YouTubeBootlegger.app
-
       - name: Package artifact (Linux)
         if: runner.os == 'Linux'
         run: |
           asset="youtube-bootlegger-${{ github.event.release.tag_name }}-linux-x64.tar.gz"
           chmod +x YouTubeBootlegger.bin
-          tar -czf "$asset" YouTubeBootlegger.bin tools
+          tar -czf "$asset" YouTubeBootlegger.bin
           echo "ASSET_PATH=$asset" >> "$GITHUB_ENV"
 
       - name: Package artifact (Windows)

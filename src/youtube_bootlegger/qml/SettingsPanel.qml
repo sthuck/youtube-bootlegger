@@ -115,7 +115,8 @@ Item {
                             onEditingFinished: backend.setYtdlpPath(text)
                             Text {
                                 anchors.fill: parent; verticalAlignment: Text.AlignVCenter
-                                text: "Leave empty to use bundled yt-dlp, then PATH"
+                                objectName: "ytdlpPathPlaceholder"
+                                text: backend.tools.texts.ytdlpPlaceholder
                                 color: root.colors.textMuted; font.pixelSize: 12
                                 visible: !ytdlpPathField.text && !ytdlpPathField.activeFocus
                             }
@@ -160,7 +161,8 @@ Item {
                             onEditingFinished: backend.setFfmpegPath(text)
                             Text {
                                 anchors.fill: parent; verticalAlignment: Text.AlignVCenter
-                                text: "Leave empty to use bundled FFmpeg, then PATH"
+                                objectName: "ffmpegPathPlaceholder"
+                                text: backend.tools.texts.ffmpegPlaceholder
                                 color: root.colors.textMuted; font.pixelSize: 12
                                 visible: !ffmpegPathField.text && !ffmpegPathField.activeFocus
                             }
@@ -178,13 +180,13 @@ Item {
                         }
                     }
                 }
+            }
 
-                Text {
-                    objectName: "ffmpegMissingWarning"
-                    text: backend.ffmpegMissing ? "FFmpeg not found at this location" : ""
-                    color: root.colors.warning; font.pixelSize: 11
-                    visible: backend.ffmpegMissing
-                }
+            /* ── runtime tools: status, download, verify ── */
+            ToolsSettingsSection {
+                objectName: "toolsSettingsSection"
+                Layout.fillWidth: true
+                colors: root.colors
             }
 
             /* ── browser cookies (age-restricted videos) ── */

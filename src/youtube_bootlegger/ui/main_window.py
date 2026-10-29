@@ -29,9 +29,10 @@ from ..app_logic import (
 from ..core import parse_tracklist_with_template
 from ..core.video_info import VideoInfo
 from ..llm import is_llm_configured, launch_chatgpt_lite_assist
-from ..core.settings import LlmProvider, get_settings
+from ..core.settings import AppSettings, LlmProvider, get_settings
+from ..core.tool_installer import HttpGet, urlopen_get
 from ..models import DownloadJob
-from ..utils import is_ffmpeg_available, is_valid_youtube_url
+from ..utils import is_valid_youtube_url
 from ..resources import APP_LOGO_PNG
 from ..workers import (
     PipelineWorker,
@@ -44,19 +45,34 @@ from .widgets import (
     MetadataInputWidget,
     ProgressPanelWidget,
     SettingsDialog,
+    ToolsBannerWidget,
     TracklistInputWidget,
     UrlInputWidget,
     VideoPreviewWidget,
 )
+from .tools_controller import RuntimeToolsController
 
 
 class MainWindow(QMainWindow):
-    """Main application window."""
+    """Main application window.
+
+    Args:
+        settings: Settings to use; defaults to the shared get_settings().
+        tools_http_get: HTTP GET used for runtime-tool downloads (tests fake it).
+    """
 
     URL_DEBOUNCE_MS = 500
 
-    def __init__(self):
+    def __init__(
+        self,
+        settings: AppSettings | None = None,
+        *,
+        tools_http_get: HttpGet = urlopen_get,
+    ):
         super().__init__()
+        self._settings = settings or get_settings()
+        self._tools_http_get = tools_http_get
+        self._settings_dialog: SettingsDialog | None = None
         self._thread_pool = QThreadPool()
         self._current_worker: PipelineWorker | None = None
         self._video_info_worker: VideoInfoWorker | None = None
@@ -73,7 +89,7 @@ class MainWindow(QMainWindow):
         self._setup_ui()
         self._setup_menu()
         self._connect_signals()
-        self._check_ffmpeg()
+        self._tools.auto_download()
 
     def _setup_ui(self) -> None:
         """Initialize and layout all UI components."""
@@ -84,9 +100,19 @@ class MainWindow(QMainWindow):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
 
-        main_layout = QHBoxLayout(central_widget)
+        outer_layout = QVBoxLayout(central_widget)
+        outer_layout.setSpacing(12)
+        outer_layout.setContentsMargins(20, 20, 20, 20)
+
+        self._tools_banner = ToolsBannerWidget()
+        outer_layout.addWidget(self._tools_banner)
+        self._tools = RuntimeToolsController(
+            self._settings, self._tools_banner, http_get=self._tools_http_get, parent=self
+        )
+
+        main_layout = QHBoxLayout()
         main_layout.setSpacing(20)
-        main_layout.setContentsMargins(20, 20, 20, 20)
+        outer_layout.addLayout(main_layout, 1)
 
         # Left column (wider) - Video input and tracklist
         left_column = QVBoxLayout()
@@ -121,6 +147,7 @@ class MainWindow(QMainWindow):
         button_layout.setSpacing(8)
 
         self._start_button = QPushButton("Start Download && Split")
+        self._start_button.setObjectName("startButton")
         self._start_button.setMinimumHeight(40)
         button_layout.addWidget(self._start_button)
 
@@ -141,15 +168,23 @@ class MainWindow(QMainWindow):
         file_menu.addAction(settings_action)
 
     def _open_settings_dialog(self) -> None:
-        """Open the settings dialog and re-check ffmpeg availability afterward."""
-        before = fetch_config(get_settings())
-        dialog = SettingsDialog(self)
-        if dialog.exec():
-            self._check_ffmpeg()
+        """Open the settings dialog; afterwards download whatever is now missing."""
+        before = fetch_config(self._settings)
+        dialog = SettingsDialog(self, settings=self._settings)
+        dialog.tools_download_requested.connect(self._tools.download)
+        dialog.tools_verify_requested.connect(lambda: self._tools.download(verify=True))
+        self._settings_dialog = dialog
+        try:
+            accepted = dialog.exec()
+        finally:
+            self._settings_dialog = None
+            dialog.deleteLater()
+        if accepted:
+            self._tools.auto_download()
             self._update_ai_availability()
             if should_refetch_video_info(
                 before,
-                fetch_config(get_settings()),
+                fetch_config(self._settings),
                 self._video_preview.get_video_info(),
                 self._url_input.get_url(),
             ):
@@ -164,7 +199,7 @@ class MainWindow(QMainWindow):
         format otherwise; detecting still needs a configured LLM, finding
         explains on click what's missing.
         """
-        settings = get_settings()
+        settings = self._settings
         tracklist = self._tracklist_input.get_text()
         info = self._video_preview.get_video_info()
         mode = ai_button_mode(tracklist)
@@ -194,7 +229,7 @@ class MainWindow(QMainWindow):
     def _on_find_requested(self) -> None:
         """Handle a "Find with AI" click."""
         info = self._video_preview.get_video_info()
-        problem = check_find_ready(info, get_settings())
+        problem = check_find_ready(info, self._settings)
         if problem:
             QMessageBox.warning(self, "AI Assist", problem)
             return
@@ -211,7 +246,7 @@ class MainWindow(QMainWindow):
             self._on_find_finished(token, cached)
             return
 
-        worker = TracklistFindWorker(get_settings(), info, token)
+        worker = TracklistFindWorker(self._settings, info, token)
         worker.signals.finished.connect(self._on_find_finished)
         worker.signals.error.connect(self._on_find_error)
         self._find_worker = worker
@@ -307,7 +342,7 @@ class MainWindow(QMainWindow):
         if not raw_tracklist.strip():
             return
 
-        settings = get_settings()
+        settings = self._settings
         if not is_llm_configured(settings):
             QMessageBox.warning(
                 self,
@@ -332,7 +367,7 @@ class MainWindow(QMainWindow):
         self._update_ai_availability()
 
         self._tracklist_ai_worker = TracklistAiWorker(
-            get_settings(),
+            self._settings,
             video_info.title,
             raw_tracklist,
         )
@@ -371,22 +406,18 @@ class MainWindow(QMainWindow):
         self._tracklist_input.find_banner_dismissed.connect(self._on_find_banner_dismissed)
         self._tracklist_input.open_settings_requested.connect(self._open_settings_dialog)
         self._tracklist_input.api_hint_dismissed.connect(self._on_api_hint_dismissed)
+        self._tools.changed.connect(self._on_tools_changed)
         self._update_ai_availability()
 
-    def _check_ffmpeg(self) -> None:
-        """Check if ffmpeg is available."""
-        ffmpeg_command = get_settings().resolved_ffmpeg_command()
-        if not is_ffmpeg_available(ffmpeg_command):
-            QMessageBox.warning(
-                self,
-                "FFmpeg Not Found",
-                f"FFmpeg was not found at '{ffmpeg_command}'.\n\n"
-                "Please install FFmpeg, ensure it's in your PATH, or set a "
-                "custom path in Settings.\n\n"
-                "On Linux: sudo apt install ffmpeg\n"
-                "On macOS: brew install ffmpeg\n"
-                "On Windows: Download from ffmpeg.org",
-            )
+    def _on_tools_changed(self) -> None:
+        """Keep an open Settings dialog's tool list in step with downloads."""
+        if self._settings_dialog is not None:
+            self._settings_dialog.refresh_tools(self._tools.downloading)
+
+    def closeEvent(self, event) -> None:
+        """Stop a running tool download when the window closes."""
+        self._tools.cancel()
+        super().closeEvent(event)
 
     def _on_url_changed(self, url: str) -> None:
         """Handle URL input changes with debouncing."""
@@ -425,7 +456,7 @@ class MainWindow(QMainWindow):
         self._video_preview.set_loading()
 
         worker = VideoInfoWorker(
-            url, comment_limit=preview_comment_limit(get_settings())
+            url, self._settings, comment_limit=preview_comment_limit(self._settings)
         )
         # Ignore results from a fetch that a newer URL has replaced.
         worker.signals.finished.connect(
@@ -445,9 +476,9 @@ class MainWindow(QMainWindow):
         self._video_preview.set_video_info(info)
         # Set default album name to video title
         self._metadata_input.set_album_placeholder(info.title)
-        self._log(video_sources_log_line(info, get_settings()))
+        self._log(video_sources_log_line(info, self._settings))
         self._update_ai_availability()
-        if should_auto_find(get_settings(), info, self._tracklist_input.get_text()):
+        if should_auto_find(self._settings, info, self._tracklist_input.get_text()):
             self._start_find(info, manual=False)
 
     def _on_video_info_error(self, message: str) -> None:
@@ -460,6 +491,11 @@ class MainWindow(QMainWindow):
     def _on_start_clicked(self) -> None:
         """Validate inputs and start pipeline worker."""
         self._clear_errors()
+
+        blocked = self._tools.start_blocked_reason()
+        if blocked:
+            QMessageBox.warning(self, "Tools Missing", blocked)
+            return
 
         url_valid, url_error = self._url_input.validate()
         if not url_valid:
@@ -513,7 +549,7 @@ class MainWindow(QMainWindow):
         self._progress_panel.reset_style()
         self._progress_panel.add_message("Starting...", "info")
 
-        self._current_worker = PipelineWorker(job)
+        self._current_worker = PipelineWorker(job, self._settings)
         self._current_worker.signals.started.connect(self._on_worker_started)
         self._current_worker.signals.progress.connect(self._on_progress)
         self._current_worker.signals.log.connect(self._on_log)

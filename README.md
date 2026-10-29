@@ -1,7 +1,9 @@
 
-## Bundled tools in releases
+## Runtime tools
 
-Releases bundle yt-dlp, FFmpeg/ffprobe, and Deno for Linux x64, Windows x64,
-and macOS ARM64. On Windows, download the single `.exe` and launch it directly.
-On Linux, extract the complete archive; on macOS move the complete app to Applications. Settings paths override bundled tools, which take priority over PATH.
-See [packaging, discovery, and licensing details](docs/bundled-tools.md).
+Releases don't include yt-dlp, FFmpeg/ffprobe or Deno. On first start the app
+downloads the pinned versions once into a per-user folder
+(`%LOCALAPPDATA%\YouTubeBootlegger\tools` on Windows,
+`~/.local/share/youtube-bootlegger/tools` on Linux and macOS) and reuses them.
+FFmpeg and Deno already on PATH are used instead, and paths set in Settings take
+priority over both. See [how the downloader works](docs/runtime-tools.md).

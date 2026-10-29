@@ -18,6 +18,7 @@ from src.youtube_bootlegger.qml_backend import backend as backend_module
 from src.youtube_bootlegger.workers import TracklistAiWorker
 from src.youtube_bootlegger.workers import video_info_worker as video_worker_module
 from src.youtube_bootlegger.app_logic import track_finder as finder_text
+from tests.tools_support import fake_path
 from tests.qml_support import (
     OTHER_URL,
     VALID_URL,
@@ -31,6 +32,7 @@ from tests.qml_support import (
     fill_form,
     find_item,
     load_video,
+    open_settings,
     open_window,
     press_key,
     prop,
@@ -50,30 +52,25 @@ def use_ai_http(monkeypatch, http_post) -> None:
     )
 
 
-def open_settings(window):
-    find_item(window, "settingsMenuAction").trigger(None)
-    QApplication.processEvents()
-    return find_item(window, "settingsPanel")
-
-
 class TestStartup:
     def test_loads_without_qml_warnings(self, qml_harness):
         window, _backend, _settings = qml_harness
         assert window.title() == "YouTube Bootlegger"
         assert prop(window, "msgOverlay", "visible") is False
 
-    def test_ffmpeg_missing_shows_warning_modal_on_startup(
+    def test_ffmpeg_missing_blocks_start_with_banner_and_reason(
         self, qapp, app_settings, monkeypatch
     ):
-        monkeypatch.setattr(backend_module, "is_ffmpeg_available", lambda cmd: False)
+        fake_path(monkeypatch, set())
         backend = AppBackend(settings=app_settings)
         with open_window(backend) as (window, warnings):
-            assert backend.ffmpegMissing is True
-            assert prop(window, "msgOverlay", "visible") is True
-            assert prop(window, "msgTitle") == "FFmpeg Not Found"
-            assert "FFmpeg is not installed" in prop(window, "msgBody")
-
-            click_item(window, "msgCloseButton")
+            # No tools folder: nothing can be downloaded, so the banner says so.
+            assert prop(window, "toolsBanner", "visible") is True
+            assert "FFmpeg can't be downloaded" in prop(window, "toolsBannerText")
+            assert prop(window, "startButton", "enabled") is False
+            assert prop(window, "startBlockedText") == (
+                "FFmpeg not found. Install it, or set its path in Settings."
+            )
             assert prop(window, "msgOverlay", "visible") is False
             assert warnings == []
 

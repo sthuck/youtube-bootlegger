@@ -48,11 +48,13 @@ from ..core.settings import (
     LlmProvider,
     get_settings,
 )
+from ..core.tool_installer import HttpGet, urlopen_get
 from ..core.video_info import VideoInfo
 from ..models import DownloadJob
-from ..utils import is_ffmpeg_available, is_valid_youtube_url
+from ..utils import is_valid_youtube_url
 from ..workers import PipelineWorker, TracklistAiWorker, TracklistFindWorker, VideoInfoWorker
 from .models import StatusLogModel, TrackPreviewModel
+from .tools_backend import ToolsBackend
 
 
 def _getter(attr):
@@ -93,7 +95,6 @@ class AppBackend(QObject):
     busyChanged = Signal()
     progressPercentChanged = Signal()
     progressStageChanged = Signal()
-    ffmpegMissingChanged = Signal()
     defaultTemplateChanged = Signal()
     useExternalYtdlpChanged = Signal()
     ytdlpPathChanged = Signal()
@@ -147,7 +148,6 @@ class AppBackend(QObject):
     busy = Property(bool, _getter("_busy"), notify=busyChanged)
     progressPercent = Property(float, _getter("_progress_percent"), notify=progressPercentChanged)
     progressStage = Property(str, _getter("_progress_stage"), notify=progressStageChanged)
-    ffmpegMissing = Property(bool, _getter("_ffmpeg_missing"), notify=ffmpegMissingChanged)
     defaultTemplate = Property(str, _getter("_default_template"), notify=defaultTemplateChanged)
     useExternalYtdlp = Property(bool, _getter("_use_external_ytdlp"), notify=useExternalYtdlpChanged)
     ytdlpPath = Property(str, _getter("_ytdlp_path"), notify=ytdlpPathChanged)
@@ -193,8 +193,14 @@ class AppBackend(QObject):
     trackPreviewModel = Property(QObject, _getter("_track_model"), constant=True)
     statusLogModel = Property(QObject, _getter("_log_model"), constant=True)
     helpContent = Property("QVariantMap", _getter("_help_content"), constant=True)
+    tools = Property(QObject, _getter("_tools"), constant=True)
 
-    def __init__(self, parent=None, settings: AppSettings | None = None):
+    def __init__(
+        self,
+        parent=None,
+        settings: AppSettings | None = None,
+        tools_http_get: HttpGet = urlopen_get,
+    ):
         super().__init__(parent)
         self._thread_pool = QThreadPool()
         self._current_worker: PipelineWorker | None = None
@@ -252,7 +258,6 @@ class AppBackend(QObject):
             for label, browser in COOKIE_BROWSER_OPTIONS
         ]
         self._ffmpeg_path = self._app_settings.ffmpeg_path
-        self._ffmpeg_missing = not is_ffmpeg_available(self._app_settings.resolved_ffmpeg_command())
         self._llm_provider = self._app_settings.llm_provider.value
         self._llm_configured = is_llm_configured(self._app_settings)
         self._openai_api_key = self._app_settings.openai_api_key
@@ -291,6 +296,11 @@ class AppBackend(QObject):
         self._log_model = StatusLogModel(self)
         self._help_content = build_help_content()
         self._refresh_ai_available()
+
+        self._tools = ToolsBackend(
+            self._app_settings, self._thread_pool, http_get=tools_http_get, parent=self
+        )
+        self._tools.checkAutoDownload()
 
     # ── Private helpers ─────────────────────────────────────────────
 
@@ -417,6 +427,7 @@ class AppBackend(QObject):
         self._app_settings.sync()
         self._emit("_use_external_ytdlp", enabled, self.useExternalYtdlpChanged)
         self._maybe_refetch_video_info(before)
+        self._tools.checkAutoDownload()
 
     @Slot(str)
     def setYtdlpPath(self, path):
@@ -425,6 +436,7 @@ class AppBackend(QObject):
         self._app_settings.sync()
         self._emit("_ytdlp_path", self._app_settings.ytdlp_path, self.ytdlpPathChanged)
         self._maybe_refetch_video_info(before)
+        self._tools.checkAutoDownload()
 
     @Slot(str)
     def setCookiesFromBrowser(self, browser):
@@ -443,11 +455,7 @@ class AppBackend(QObject):
         self._app_settings.ffmpeg_path = path
         self._app_settings.sync()
         self._emit("_ffmpeg_path", self._app_settings.ffmpeg_path, self.ffmpegPathChanged)
-        self._emit(
-            "_ffmpeg_missing",
-            not is_ffmpeg_available(self._app_settings.resolved_ffmpeg_command()),
-            self.ffmpegMissingChanged,
-        )
+        self._tools.checkAutoDownload()
 
     @Slot(str)
     def setLlmProvider(self, provider):
@@ -692,6 +700,10 @@ class AppBackend(QObject):
     @Slot()
     def startPipeline(self):
         if self._busy:
+            return
+        blocked = self._tools.start_blocked_reason()
+        if blocked:
+            self.showMessage.emit("Can't start yet", blocked, True)
             return
         self._emit("_url_error", "", self.urlErrorChanged)
         self._emit("_dir_error", "", self.dirErrorChanged)

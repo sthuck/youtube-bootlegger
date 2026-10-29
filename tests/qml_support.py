@@ -241,10 +241,12 @@ def open_window(backend: AppBackend):
             yield window, warnings
         finally:
             # A pending debounce would otherwise fire during a later test's
-            # event processing, after this test's fakes are gone.
+            # event processing, after this test's fakes are gone. Closing the
+            # window first cancels a running tools download.
             backend._url_debounce.stop()
-            backend._thread_pool.waitForDone(2000)
             window.close()
+            app.processEvents()
+            backend._thread_pool.waitForDone(2000)
             app.processEvents()
             del window
             del roots
@@ -360,6 +362,13 @@ def wait_for_workers(backend: AppBackend) -> None:
     """Wait until background workers finish and their queued signals are delivered."""
     backend._thread_pool.waitForDone(2000)
     QTest.qWait(20)
+
+
+def open_settings(window: QQuickWindow) -> QObject:
+    """Open Settings the way a user does, through the File menu."""
+    find_item(window, "settingsMenuAction").trigger(None)
+    QApplication.processEvents()
+    return find_item(window, "settingsPanel")
 
 
 def load_video(window: QQuickWindow, backend: AppBackend, url: str = VALID_URL) -> None:
