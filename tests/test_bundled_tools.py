@@ -177,10 +177,14 @@ def test_native_tools_without_path(tmp_path, monkeypatch):
         str(directory / ("ffprobe" + suffix)), "-v", "error", "-show_format", "-of", "json", str(audio),
     ], check=True, capture_output=True, text=True, timeout=30)
     assert float(json.loads(probe.stdout)["format"]["duration"]) > 0
-    subprocess.run([
+    extraction = subprocess.run([
         settings.resolved_ytdlp_command(), "--ignore-config", *settings.ytdlp_tool_cli_args(),
-        "--list-extractors",
-    ], check=True, capture_output=True, timeout=30)
+        "--verbose", "--enable-file-urls", "--skip-download", "--simulate", audio.as_uri(),
+    ], check=True, capture_output=True, text=True, encoding="utf-8", timeout=30)
+    # Check actual detection by yt-dlp, not only that it accepts the flags.
+    assert "JS runtimes: deno-" in extraction.stderr
+    assert "exe versions: ffmpeg " in extraction.stderr
+    assert "ffprobe " in extraction.stderr
     deno = subprocess.run([
         str(directory / ("deno" + suffix)), "eval", "console.log(1 + 1)",
     ], check=True, capture_output=True, text=True, timeout=30)

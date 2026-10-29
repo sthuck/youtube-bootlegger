@@ -74,8 +74,7 @@ def extract_asset(archive: Path, asset: dict, destination: Path) -> None:
 
 def run_tool(directory: Path, name: str, *args: str) -> str:
     suffix = ".exe" if sys.platform == "win32" else ""
-    # The Windows executable otherwise emits extractor names in the system
-    # code page, even when our Python parent is decoding UTF-8.
+    # Match the application's output encoding when yt-dlp initializes its API.
     encoding_args = ["--encoding", "utf-8"] if name == "yt-dlp" else []
     result = subprocess.run(
         [str(directory / f"{name}{suffix}"), *encoding_args, *args],
@@ -99,7 +98,7 @@ def smoke_check(directory: Path) -> None:
     suffix = ".exe" if sys.platform == "win32" else ""
     run_tool(directory, "yt-dlp", "--ignore-config", "--js-runtimes",
              f"deno:{directory / ('deno' + suffix)}", "--ffmpeg-location",
-             str(directory / ("ffmpeg" + suffix)), "--list-extractors")
+             str(directory / ("ffmpeg" + suffix)), "--version")
 
 
 def bundle_tools(platform: str, destination: Path) -> None:
