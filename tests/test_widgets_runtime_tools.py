@@ -363,8 +363,9 @@ def test_settings_download_missing_button_fetches_missing_tools(
 
     in_settings(window, interact)
 
-    assert installed(tools_dir, "ffmpeg")
-    assert not banner_shown(window)
+    # FFmpeg can finish before Deno does; wait for the whole download.
+    wait_until(lambda: not banner_shown(window), 5000)
+    assert all(installed(tools_dir, name) for name in ("yt-dlp", "ffmpeg", "deno"))
 
 
 def test_saving_settings_downloads_what_is_now_missing(
