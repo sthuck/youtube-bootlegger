@@ -115,7 +115,7 @@ Item {
                             onEditingFinished: backend.setYtdlpPath(text)
                             Text {
                                 anchors.fill: parent; verticalAlignment: Text.AlignVCenter
-                                text: "Leave empty to use \"yt-dlp\" bundled tool, then PATH"
+                                text: "Leave empty to use \"yt-dlp\" from PATH"
                                 color: root.colors.textMuted; font.pixelSize: 12
                                 visible: !ytdlpPathField.text && !ytdlpPathField.activeFocus
                             }
@@ -160,7 +160,7 @@ Item {
                             onEditingFinished: backend.setFfmpegPath(text)
                             Text {
                                 anchors.fill: parent; verticalAlignment: Text.AlignVCenter
-                                text: "Leave empty to use \"ffmpeg\" bundled tool, then PATH"
+                                text: "Leave empty to use \"ffmpeg\" from PATH"
                                 color: root.colors.textMuted; font.pixelSize: 12
                                 visible: !ffmpegPathField.text && !ffmpegPathField.activeFocus
                             }
@@ -231,17 +231,7 @@ Item {
                     columnSpacing: 6
 
                     Repeater {
-                        model: [
-                            { id: "", label: "None" },
-                            { id: "firefox", label: "Firefox" },
-                            { id: "chrome", label: "Chrome" },
-                            { id: "brave", label: "Brave" },
-                            { id: "edge", label: "Edge" },
-                            { id: "safari", label: "Safari" },
-                            { id: "chromium", label: "Chromium" },
-                            { id: "opera", label: "Opera" },
-                            { id: "vivaldi", label: "Vivaldi" }
-                        ]
+                        model: backend.cookieBrowserOptions
                         delegate: Rectangle {
                             id: cookieBrowserDelegate
                             required property var modelData

@@ -2,10 +2,11 @@
 
 from dataclasses import dataclass
 
-from ..core.settings import AppSettings
+from ..core.settings import AppSettings, CookieBrowser
 from ..core.template_parser import ParsePreview
 from ..core.video_info import VideoInfo
 from ..llm import is_llm_configured
+from ..utils.validators import is_valid_youtube_url
 
 MAX_TITLE_LENGTH = 80
 
@@ -92,3 +93,34 @@ def log_ai_requests_note(settings: AppSettings) -> str:
     path = settings.ai_request_log_path
     where = str(path) if path else "ai-requests.log in the settings folder"
     return f"Saves each AI request and response, without API keys, to {where}."
+
+
+@dataclass(frozen=True)
+class FetchConfig:
+    """Settings that affect how yt-dlp fetches video metadata."""
+
+    use_external_ytdlp: bool
+    ytdlp_path: str
+    cookies_from_browser: CookieBrowser
+
+
+def fetch_config(settings: AppSettings) -> FetchConfig:
+    """Snapshot the settings that affect video metadata fetching."""
+    return FetchConfig(
+        use_external_ytdlp=settings.use_external_ytdlp,
+        ytdlp_path=settings.ytdlp_path,
+        cookies_from_browser=settings.cookies_from_browser,
+    )
+
+
+def should_refetch_video_info(
+    before: FetchConfig,
+    after: FetchConfig,
+    video_info: VideoInfo | None,
+    url: str,
+) -> bool:
+    """Return True when a settings change should retry fetching video metadata."""
+    if before == after or video_info is not None:
+        return False
+    cleaned = (url or "").strip()
+    return bool(cleaned and is_valid_youtube_url(cleaned))

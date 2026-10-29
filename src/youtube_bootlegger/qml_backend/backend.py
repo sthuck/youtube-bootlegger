@@ -27,11 +27,13 @@ from ..app_logic import (
     build_help_content,
     build_job,
     check_ai_assist_ready,
-    log_ai_requests_note,
     check_find_ready,
+    fetch_config,
     format_progress_stage,
+    log_ai_requests_note,
     preview_comment_limit,
     should_auto_find,
+    should_refetch_video_info,
     summarize_preview,
     summarize_video,
     video_sources_log_line,
@@ -40,6 +42,7 @@ from ..app_logic import track_finder as finder_text
 from ..core import DEFAULT_TEMPLATE, preview_parse, validate_template
 from ..llm import is_llm_configured, launch_chatgpt_lite_assist
 from ..core.settings import (
+    COOKIE_BROWSER_OPTIONS,
     COOKIE_BROWSER_TOOLTIP,
     AppSettings,
     LlmProvider,
@@ -152,6 +155,9 @@ class AppBackend(QObject):
         str, _getter("_cookies_from_browser"), notify=cookiesFromBrowserChanged
     )
     cookiesBrowserTooltip = Property(str, _getter("_cookies_browser_tooltip"), constant=True)
+    cookieBrowserOptions = Property(
+        "QVariantList", _getter("_cookie_browser_options"), constant=True
+    )
     ffmpegPath = Property(str, _getter("_ffmpeg_path"), notify=ffmpegPathChanged)
     llmProvider = Property(str, _getter("_llm_provider"), notify=llmProviderChanged)
     llmConfigured = Property(bool, _getter("_llm_configured"), notify=llmConfiguredChanged)
@@ -241,6 +247,10 @@ class AppBackend(QObject):
         self._ytdlp_path = self._app_settings.ytdlp_path
         self._cookies_from_browser = self._app_settings.cookies_from_browser.value
         self._cookies_browser_tooltip = COOKIE_BROWSER_TOOLTIP
+        self._cookie_browser_options = [
+            {"id": browser.value, "label": label}
+            for label, browser in COOKIE_BROWSER_OPTIONS
+        ]
         self._ffmpeg_path = self._app_settings.ffmpeg_path
         self._ffmpeg_missing = not is_ffmpeg_available(self._app_settings.resolved_ffmpeg_command())
         self._llm_provider = self._app_settings.llm_provider.value
@@ -391,20 +401,34 @@ class AppBackend(QObject):
         self._output_dir = path
         self._emit("_dir_error", "", self.dirErrorChanged)
 
+    def _maybe_refetch_video_info(self, before):
+        if should_refetch_video_info(
+            before, fetch_config(self._app_settings), self._video_info, self._url
+        ):
+            self._last_fetched_url = ""
+            self._video_request_id += 1
+            self._emit("_url_error", "", self.urlErrorChanged)
+            self._url_debounce.start(self.URL_DEBOUNCE_MS)
+
     @Slot(bool)
     def setUseExternalYtdlp(self, enabled):
+        before = fetch_config(self._app_settings)
         self._app_settings.use_external_ytdlp = enabled
         self._app_settings.sync()
         self._emit("_use_external_ytdlp", enabled, self.useExternalYtdlpChanged)
+        self._maybe_refetch_video_info(before)
 
     @Slot(str)
     def setYtdlpPath(self, path):
+        before = fetch_config(self._app_settings)
         self._app_settings.ytdlp_path = path
         self._app_settings.sync()
         self._emit("_ytdlp_path", self._app_settings.ytdlp_path, self.ytdlpPathChanged)
+        self._maybe_refetch_video_info(before)
 
     @Slot(str)
     def setCookiesFromBrowser(self, browser):
+        before = fetch_config(self._app_settings)
         self._app_settings.cookies_from_browser = browser
         self._app_settings.sync()
         self._emit(
@@ -412,9 +436,7 @@ class AppBackend(QObject):
             self._app_settings.cookies_from_browser.value,
             self.cookiesFromBrowserChanged,
         )
-        if self._video_info is None and self._url and is_valid_youtube_url(self._url):
-            self._emit("_url_error", "", self.urlErrorChanged)
-            self._url_debounce.start(self.URL_DEBOUNCE_MS)
+        self._maybe_refetch_video_info(before)
 
     @Slot(str)
     def setFfmpegPath(self, path):

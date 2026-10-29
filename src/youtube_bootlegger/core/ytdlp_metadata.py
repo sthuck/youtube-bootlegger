@@ -10,7 +10,7 @@ import subprocess
 import yt_dlp
 
 from .exceptions import ValidationError
-from .settings import AppSettings, format_ytdlp_age_or_cookie_error, get_settings
+from .settings import AppSettings, format_ytdlp_age_or_cookie_error
 
 METADATA_TIMEOUT_SECONDS = 30
 # Comment extraction pages through many extra requests.
@@ -62,14 +62,13 @@ def _max_comments(limit: int) -> list[str]:
     return [str(limit), str(limit), "0", "0"]
 
 
-def _fetch_library(url: str, comment_limit: int, settings: AppSettings | None = None):
-    active_settings = settings or get_settings()
+def _fetch_library(url: str, comment_limit: int, settings: AppSettings):
     options = {
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
         "skip_download": True,
-        **active_settings.ytdlp_cookie_options(),
+        **settings.ytdlp_cookie_options(),
     }
     if comment_limit:
         options.update({
@@ -87,9 +86,9 @@ def _fetch_library(url: str, comment_limit: int, settings: AppSettings | None = 
         with yt_dlp.YoutubeDL(options) as ydl:
             return ydl.extract_info(url, download=False)
     except yt_dlp.utils.DownloadError as e:
-        raise _fetch_error(str(e), active_settings) from e
+        raise _fetch_error(str(e), settings) from e
     except Exception as e:
-        friendly = format_ytdlp_age_or_cookie_error(str(e), active_settings)
+        friendly = format_ytdlp_age_or_cookie_error(str(e), settings)
         if friendly:
             raise ValidationError(friendly) from e
         raise ValidationError(f"Error fetching video info: {e}") from e
@@ -147,7 +146,7 @@ def _run_external(url: str, settings: AppSettings, comment_limit: int):
         raise ValidationError(f"Could not run yt-dlp: {e}") from e
 
 
-def _fetch_error(message: str, settings: AppSettings | None = None) -> ValidationError:
+def _fetch_error(message: str, settings: AppSettings) -> ValidationError:
     """Turn a yt-dlp failure message into a user-facing error."""
     friendly = format_ytdlp_age_or_cookie_error(message, settings)
     if friendly:

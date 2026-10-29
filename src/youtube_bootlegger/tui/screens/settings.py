@@ -63,8 +63,8 @@ PROVIDER_FIELDS: dict[LlmProvider, tuple[SettingField, ...]] = {
 }
 
 TOOL_FIELDS = (
-    SettingField("ytdlp_path", "yt-dlp path", 'Leave empty to use "yt-dlp" bundled tool, then PATH'),
-    SettingField("ffmpeg_path", "ffmpeg path", 'Leave empty to use "ffmpeg" bundled tool, then PATH'),
+    SettingField("ytdlp_path", "yt-dlp path", 'Leave empty to use "yt-dlp" from PATH'),
+    SettingField("ffmpeg_path", "ffmpeg path", 'Leave empty to use "ffmpeg" from PATH'),
 )
 
 

@@ -2,6 +2,7 @@
 
 from enum import StrEnum
 from pathlib import Path
+import sys
 from typing import Any, Protocol
 
 from PySide6.QtCore import QSettings
@@ -43,7 +44,7 @@ class CookieBrowser(StrEnum):
     VIVALDI = "vivaldi"
 
 
-COOKIE_BROWSER_OPTIONS: tuple[tuple[str, CookieBrowser], ...] = (
+_ALL_COOKIE_BROWSER_OPTIONS: tuple[tuple[str, CookieBrowser], ...] = (
     ("None (disabled)", CookieBrowser.NONE),
     ("Firefox", CookieBrowser.FIREFOX),
     ("Chrome", CookieBrowser.CHROME),
@@ -55,8 +56,14 @@ COOKIE_BROWSER_OPTIONS: tuple[tuple[str, CookieBrowser], ...] = (
     ("Vivaldi", CookieBrowser.VIVALDI),
 )
 
+COOKIE_BROWSER_OPTIONS: tuple[tuple[str, CookieBrowser], ...] = tuple(
+    (label, browser)
+    for label, browser in _ALL_COOKIE_BROWSER_OPTIONS
+    if browser != CookieBrowser.SAFARI or sys.platform == "darwin"
+)
+
 COOKIE_BROWSER_LABELS: dict[CookieBrowser, str] = {
-    browser: label for label, browser in COOKIE_BROWSER_OPTIONS
+    browser: label for label, browser in _ALL_COOKIE_BROWSER_OPTIONS
 }
 
 COOKIE_BROWSER_TOOLTIP = (
@@ -64,6 +71,17 @@ COOKIE_BROWSER_TOOLTIP = (
     "age-restricted videos. Note: on Windows, Chrome, Edge, and Brave lock "
     "their cookie database while running — close the browser first or use Firefox."
 )
+
+
+def _parse_cookie_browser(value: CookieBrowser | str | None) -> CookieBrowser:
+    """Parse a stored or user-supplied cookie browser value."""
+    raw = str(value or "").strip().lower()
+    if not raw or raw == "none":
+        return CookieBrowser.NONE
+    try:
+        return CookieBrowser(raw)
+    except ValueError:
+        return CookieBrowser.NONE
 
 
 class LlmProvider(StrEnum):
@@ -135,25 +153,14 @@ class AppSettings:
 
     @property
     def cookies_from_browser(self) -> CookieBrowser:
-        raw = str(self._backend.value(_COOKIES_FROM_BROWSER_KEY, "") or "").strip().lower()
-        if not raw or raw == "none":
-            return CookieBrowser.NONE
-        try:
-            return CookieBrowser(raw)
-        except ValueError:
-            return CookieBrowser.NONE
+        return _parse_cookie_browser(self._backend.value(_COOKIES_FROM_BROWSER_KEY, ""))
 
     @cookies_from_browser.setter
     def cookies_from_browser(self, browser: CookieBrowser | str) -> None:
-        raw = str(browser or "").strip().lower()
-        if not raw or raw == "none":
-            parsed = CookieBrowser.NONE
-        else:
-            try:
-                parsed = CookieBrowser(raw)
-            except ValueError:
-                parsed = CookieBrowser.NONE
-        self._backend.setValue(_COOKIES_FROM_BROWSER_KEY, parsed.value)
+        self._backend.setValue(
+            _COOKIES_FROM_BROWSER_KEY,
+            _parse_cookie_browser(browser).value,
+        )
 
     def ytdlp_cookie_options(self) -> dict[str, Any]:
         """Return yt-dlp Python API option dict for browser cookie extraction."""
@@ -315,20 +322,35 @@ class AppSettings:
         self._backend.sync()
 
 
+def _is_cookie_lock_line(line: str) -> bool:
+    """Return True if a single output/error line indicates a locked cookie database."""
+    if "extracted" in line and "cookies from" in line:
+        return False
+    return (
+        ("could not copy" in line and "cookie" in line)
+        or ("cookie" in line and "database is locked" in line)
+        or ("cookie" in line and "permission" in line)
+        or ("failed to decrypt" in line and "cookie" in line)
+    )
+
+
 def format_ytdlp_age_or_cookie_error(
     error_text: str,
-    settings: AppSettings | None = None,
+    settings: AppSettings,
 ) -> str | None:
     """Return a user-friendly message for yt-dlp age-restriction or cookie lock errors."""
     lowered = (error_text or "").lower()
-    active_settings = settings or get_settings()
-    browser = active_settings.cookies_from_browser
+    browser = settings.cookies_from_browser
     browser_label = COOKIE_BROWSER_LABELS.get(browser, browser.value.title())
 
-    if browser != CookieBrowser.NONE and (
-        "could not copy" in lowered and "cookie" in lowered
-        or "database is locked" in lowered
-        or ("cookie" in lowered and "permission" in lowered)
+    if browser == CookieBrowser.SAFARI and "unsupported platform" in lowered:
+        return (
+            "Safari cookies are only supported on macOS. Select a different browser "
+            "in Settings."
+        )
+
+    if browser != CookieBrowser.NONE and any(
+        _is_cookie_lock_line(line) for line in lowered.splitlines()
     ):
         return (
             f"Could not read cookies from {browser_label} (the browser may be locking "

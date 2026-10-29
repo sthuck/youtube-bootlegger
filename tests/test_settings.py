@@ -6,6 +6,7 @@ from src.youtube_bootlegger.llm import (
     DEFAULT_VERTEX_MODEL,
 )
 from src.youtube_bootlegger.core.settings import (
+    COOKIE_BROWSER_OPTIONS,
     COOKIE_BROWSER_TOOLTIP,
     AppSettings,
     CookieBrowser,
@@ -248,3 +249,48 @@ class TestCookieBrowserSettings:
         assert msg is not None
         assert "Chrome" in msg
         assert "Firefox" in msg
+
+    def test_extracted_cookies_plus_output_permission_error_is_not_cookie_lock(self):
+        settings = AppSettings(FakeSettingsBackend())
+        settings.cookies_from_browser = CookieBrowser.FIREFOX
+        output = (
+            "[cookies] Extracted 120 cookies from firefox\n"
+            "ERROR: unable to open for writing: [Errno 13] Permission denied: '/out/song.mp3'"
+        )
+        assert format_ytdlp_age_or_cookie_error(output, settings) is None
+
+    def test_safari_only_offered_on_macos_and_reports_unsupported_platform(self):
+        import sys
+
+        browsers = [browser for _, browser in COOKIE_BROWSER_OPTIONS]
+        assert (CookieBrowser.SAFARI in browsers) is (sys.platform == "darwin")
+
+        settings = AppSettings(FakeSettingsBackend())
+        settings.cookies_from_browser = CookieBrowser.SAFARI
+        msg = format_ytdlp_age_or_cookie_error(
+            "ValueError: unsupported platform: linux",
+            settings,
+        )
+        assert msg is not None
+        assert "macOS" in msg
+
+    def test_should_refetch_video_info(self):
+        from src.youtube_bootlegger.app_logic import fetch_config, should_refetch_video_info
+        from tests.qml_support import VALID_URL, make_video
+
+        s1 = AppSettings(FakeSettingsBackend())
+        s2 = AppSettings(FakeSettingsBackend())
+        s2.cookies_from_browser = CookieBrowser.FIREFOX
+
+        assert not should_refetch_video_info(
+            fetch_config(s1), fetch_config(s1), None, VALID_URL
+        )
+        assert should_refetch_video_info(
+            fetch_config(s1), fetch_config(s2), None, VALID_URL
+        )
+        assert not should_refetch_video_info(
+            fetch_config(s1), fetch_config(s2), make_video(), VALID_URL
+        )
+        assert not should_refetch_video_info(
+            fetch_config(s1), fetch_config(s2), None, "not-a-url"
+        )

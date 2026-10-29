@@ -203,6 +203,29 @@ class TestOutOfOrderVideoResults:
         assert backend.videoLoaded is True
         assert prop(window, "urlErrorText") == ""
 
+    def test_changing_cookie_browser_during_fetch_refetches_and_ignores_first_error(
+        self, qml_harness, gated_fetch
+    ):
+        window, backend, _settings = qml_harness
+        set_text(window, "urlField", VALID_URL)
+        wait_until(lambda: len(gated_fetch.calls) == 1)
+
+        open_settings(window)
+        click_item(window, "cookieBrowser_firefox")
+        # Clicking the already-selected browser must not start a third fetch.
+        click_item(window, "cookieBrowser_firefox")
+        click_item(window, "settingsDoneButton")
+        wait_until(lambda: len(gated_fetch.calls) == 2)
+
+        gated_fetch.calls[0].fail("This video is age-restricted.")
+        wait_until(lambda: backend._thread_pool.activeThreadCount() == 1)
+        QApplication.processEvents()
+        gated_fetch.calls[1].succeed("Age-Restricted Live Set")
+        wait_until(lambda: backend.videoLoaded)
+
+        assert prop(window, "videoTitleText") == "Age-Restricted Live Set"
+        assert prop(window, "urlErrorText") == ""
+
 
 class TestMetadataFields:
     def test_typed_artist_and_album_keep_spaces(self, qml_harness):
