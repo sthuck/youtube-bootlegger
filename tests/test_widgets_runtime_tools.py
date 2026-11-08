@@ -254,9 +254,10 @@ def fill_form(window, output_dir) -> None:
 
 
 def test_start_while_ffmpeg_missing_shows_reason_and_does_not_start(
-    open_main_window, server, fake_video, fake_pipeline, tmp_path, monkeypatch
+    open_main_window, server, fake_video, fake_pipeline, tmp_path, tools_dir, monkeypatch
 ):
     fake_path(monkeypatch, set())
+    install_fake_tools(tools_dir, server, ("yt-dlp",))
     server.hold()
     window = open_main_window()
     fill_form(window, tmp_path)

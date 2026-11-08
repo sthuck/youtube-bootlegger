@@ -258,13 +258,14 @@ class TestStartGating:
         self, settings, server, monkeypatch, fake_video, fake_pipeline
     ):
         fake_path(monkeypatch)
+        install_fake_tools(settings.tools_dir, server, ("yt-dlp",))
         server.hold()
         app = make_app(settings, server)
         async with app.run_test(size=SIZE) as pilot:
             await fill_form(app, pilot)
             await pilot.press("f5")
             await pilot.pause()
-            assert "Wait for yt-dlp and FFmpeg to finish downloading." in log_text(app)
+            assert "Wait for FFmpeg to finish downloading." in log_text(app)
             assert fake_pipeline.instances == []
             assert not app.busy
 

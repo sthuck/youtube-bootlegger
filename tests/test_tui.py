@@ -686,8 +686,9 @@ class TestDialogs:
             screen.query_one("#setting-ytdlp-extra-args", Input).value = "--proxy socks5://h:1"
             await pilot.pause()
             assert str(screen.query_one("#extra-args-error").render()) == ""
+            await wait_for(pilot, lambda: not screen.query_one("#settings-save", Button).has_class("-active"))
             await pilot.click("#settings-save")
-            await pilot.pause()
+            await wait_for(pilot, lambda: app.screen is not screen)
             assert settings.ytdlp_extra_args == "--proxy socks5://h:1"
             assert settings.ffmpeg_path == "/opt/ffmpeg"
 
