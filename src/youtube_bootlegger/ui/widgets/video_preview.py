@@ -230,7 +230,7 @@ class VideoPreviewWidget(QWidget):
 
         self._load_thumbnail(info.thumbnail_url)
 
-    def set_loading(self) -> None:
+    def set_loading(self, message: str = "Loading video info...") -> None:
         """Show loading state."""
         self._current_info = None
 
@@ -239,7 +239,7 @@ class VideoPreviewWidget(QWidget):
         self._thumbnail_label.setPixmap(QPixmap())
 
         self._title_label.setStyleSheet(self._get_title_style())
-        self._title_label.setText("Loading video info...")
+        self._title_label.setText(message)
 
         self._channel_label.setStyleSheet(self._get_secondary_style())
         self._channel_label.setText("")

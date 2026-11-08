@@ -79,6 +79,12 @@ class ToolsBackend(QObject):
     def start_blocked_reason(self) -> str | None:
         return self._session.start_blocked_reason()
 
+    def defer_video_info(self, url: str) -> bool:
+        return self._session.defer_video_info(url)
+
+    def resume_video_info(self, url: str) -> bool:
+        return self._session.resume_video_info(url)
+
     # ── Slots ──────────────────────────────────────────────────────
 
     @Slot()

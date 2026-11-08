@@ -26,9 +26,9 @@ class VideoPanel(Vertical):
         yield Static("", id="video-channel")
         yield Static("", id="video-details")
 
-    def show_loading(self) -> None:
+    def show_loading(self, message: str = "Loading video info...") -> None:
         self._clear_thumbnail()
-        self._set_text("Loading video info...", "", "")
+        self._set_text(message, "", "")
         self.remove_class("-error")
 
     def show_error(self, message: str) -> None:

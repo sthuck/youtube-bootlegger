@@ -7,7 +7,7 @@ title = YouTubeBootlegger
 project_dir = .
 
 # source file entry point path. default = main.py
-input_file = main.py
+input_file = main_qml.py
 
 # directory where the executable output is generated
 exec_directory = .
@@ -21,7 +21,7 @@ icon = src/youtube_bootlegger/assets/logo.png
 [python]
 
 # python path
-python_path = 
+python_path = /home/aviad/git/personal/youtube-bootlegger/.venv/bin/python3
 
 # python packages to install
 packages = Nuitka
@@ -40,7 +40,7 @@ qml_files = src/youtube_bootlegger/qml/Main.qml,src/youtube_bootlegger/qml/Progr
 excluded_qml_plugins = QtCharts,QtQuick3D,QtSensors,QtTest,QtWebEngine
 
 # qt modules used. comma separated
-modules = Core,DBus,Gui,Network,OpenGL,Qml,QmlMeta,QmlModels,QmlWorkerScript,Quick,QuickControls2,QuickTemplates2,Widgets
+modules = Core,DBus,Gui,Network,OpenGL,Qml,QmlMeta,QmlModels,QmlWorkerScript,Quick,QuickControls2,QuickTemplates2,Svg,Widgets
 
 # qt plugins used by the application. only relevant for desktop deployment
 # for qt plugins used in android application see [android][plugins]
@@ -68,12 +68,7 @@ macos.permissions =
 mode = onefile
 
 # specify any extra nuitka arguments
-# yt_dlp.extractor.lazy_extractors is a ~15k line generated module that makes
-# Nuitka's C compilation pathologically slow and memory hungry. Excluding it
-# from compilation is safe, yt-dlp catches the resulting ImportError at
-# runtime and falls back to importing its extractors directly (see
-# yt_dlp/extractor/extractors.py).
-extra_args = --quiet --noinclude-qt-translations --nofollow-import-to=yt_dlp.extractor.lazy_extractors
+extra_args = --quiet --noinclude-qt-translations
 
 [buildozer]
 

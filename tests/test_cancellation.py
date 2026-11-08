@@ -7,7 +7,6 @@ import time
 from pathlib import Path
 
 import pytest
-import yt_dlp
 
 from src.youtube_bootlegger.core.cancellation import CancelToken
 from src.youtube_bootlegger.core.downloader import AudioDownloader
@@ -136,44 +135,9 @@ class TestCancelToken:
 
 
 class TestDownloaderCancellation:
-    def test_progress_hook_aborts_library_download(self):
-        token = CancelToken()
-        downloader = AudioDownloader(settings=make_settings(), cancel_token=token)
-        token.cancel()
-        with pytest.raises(yt_dlp.utils.DownloadCancelled):
-            downloader._progress_hook({"status": "downloading", "downloaded_bytes": 1})
-
-    def test_hook_aborts_even_without_progress_callback(self):
-        token = CancelToken()
-        downloader = AudioDownloader(
-            settings=make_settings(), cancel_token=token, progress_callback=None
-        )
-        token.cancel()
-        with pytest.raises(yt_dlp.utils.DownloadCancelled):
-            downloader._postprocessor_hook({"status": "started"})
-
-    def test_library_cancel_maps_to_operation_cancelled(self, monkeypatch, tmp_path):
-        class CancellingYDL:
-            def __init__(self, opts):
-                self.opts = opts
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *exc):
-                return False
-
-            def extract_info(self, url, download):
-                raise yt_dlp.utils.DownloadCancelled("cancelled")
-
-        monkeypatch.setattr(yt_dlp, "YoutubeDL", CancellingYDL)
-        downloader = AudioDownloader(output_dir=tmp_path, settings=make_settings())
-        with pytest.raises(OperationCancelledError):
-            downloader.download("https://youtu.be/x")
-
     def test_external_download_killed_mid_way(self, tmp_path):
         ytdlp = write_script(tmp_path / "yt-dlp", SLOW_YTDLP)
-        settings = make_settings(use_external_ytdlp=True, ytdlp_path=str(ytdlp))
+        settings = make_settings(ytdlp_path=str(ytdlp))
         token = CancelToken()
         progress = []
         downloader = AudioDownloader(
@@ -241,7 +205,7 @@ class TestPipelineCancellation:
 
     def test_cancel_during_download_returns_empty_quickly(self, tmp_path):
         ytdlp = write_script(tmp_path / "yt-dlp", SLOW_YTDLP)
-        settings = make_settings(use_external_ytdlp=True, ytdlp_path=str(ytdlp))
+        settings = make_settings(ytdlp_path=str(ytdlp))
         pipeline = DownloadSplitPipeline(settings=settings)
         threading.Thread(target=lambda: (time.sleep(0.5), pipeline.cancel())).start()
         start = time.monotonic()

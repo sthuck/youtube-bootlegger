@@ -112,7 +112,7 @@ def settings():
 
 @pytest.fixture
 def window(widgets_app, settings, monkeypatch):
-    fake_path(monkeypatch, {"ffmpeg", "ffprobe"})
+    fake_path(monkeypatch, {"ffmpeg", "ffprobe", "yt-dlp"})
     monkeypatch.setattr(main_window_module, "QMessageBox", FakeMessageBox)
     FakeMessageBox.shown = []
     window = main_window_module.MainWindow(settings=settings)

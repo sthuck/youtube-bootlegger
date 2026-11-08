@@ -16,9 +16,25 @@ from src.youtube_bootlegger.core import tools
 from src.youtube_bootlegger.core.tool_installer import install_tools
 from src.youtube_bootlegger.core.tool_manifest import TOOL_LABELS, ToolAsset, ToolSpec
 from src.youtube_bootlegger.core.tools import ToolStore, exe_name
+from src.youtube_bootlegger.core.exceptions import ValidationError
+from tests.qml_support import make_video
 
 _EXECUTABLES = {"yt-dlp": ("yt-dlp",), "ffmpeg": ("ffmpeg", "ffprobe"), "deno": ("deno",)}
 TOOL_NAMES = {"yt-dlp", "ffmpeg", "ffprobe", "deno"}
+
+
+def video_requiring_ytdlp(monkeypatch, module):
+    """Fake the video boundary, preserving its dependency on installed yt-dlp."""
+    calls = []
+
+    def fetch(url, settings=None, comment_limit=0):
+        calls.append(url)
+        if settings.tool_store.executable("yt-dlp") is None:
+            raise ValidationError("yt-dlp executable not found")
+        return make_video(title=url)
+
+    monkeypatch.setattr(module, "fetch_video_info", fetch)
+    return calls
 
 
 def _zip_bytes(files: dict[str, bytes]) -> bytes:

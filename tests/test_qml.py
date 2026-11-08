@@ -66,10 +66,10 @@ class TestStartup:
         with open_window(backend) as (window, warnings):
             # No tools folder: nothing can be downloaded, so the banner says so.
             assert prop(window, "toolsBanner", "visible") is True
-            assert "FFmpeg can't be downloaded" in prop(window, "toolsBannerText")
+            assert "yt-dlp and FFmpeg can't be downloaded" in prop(window, "toolsBannerText")
             assert prop(window, "startButton", "enabled") is False
             assert prop(window, "startBlockedText") == (
-                "FFmpeg not found. Install it, or set its path in Settings."
+                "yt-dlp and FFmpeg not found. Install it, or set its path in Settings."
             )
             assert prop(window, "msgOverlay", "visible") is False
             assert warnings == []
@@ -825,8 +825,6 @@ class TestPanelsAndDialogs:
         settings_panel = open_settings(window)
         assert settings_panel.property("open") is True
 
-        click_item(window, "externalYtdlpToggle")
-        assert backend.useExternalYtdlp is True
         assert prop(window, "ytdlpPathSection", "enabled") is True
 
         assert "Windows" in prop(window, "cookiesBrowserInfoIcon", "tooltipText")
@@ -847,7 +845,6 @@ class TestPanelsAndDialogs:
         click_item(window, "settingsDoneButton")
 
         assert settings_panel.property("open") is False
-        assert settings.use_external_ytdlp is True
         assert settings.ytdlp_path == "/opt/yt-dlp"
         assert settings.cookies_from_browser == CookieBrowser.FIREFOX
         assert settings.ffmpeg_path == "/opt/ffmpeg"

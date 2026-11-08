@@ -126,7 +126,7 @@ def fake_video(monkeypatch):
         return make_video()
 
     monkeypatch.setattr(app_module, "fetch_video_info", fetch)
-    fake_path(monkeypatch, {"ffmpeg", "ffprobe"})
+    fake_path(monkeypatch, {"ffmpeg", "ffprobe", "yt-dlp"})
     monkeypatch.setattr(app_module, "URL_DEBOUNCE_SECONDS", 0.01)
     return calls
 
@@ -686,8 +686,9 @@ class TestDialogs:
             screen.query_one("#setting-ytdlp-extra-args", Input).value = "--proxy socks5://h:1"
             await pilot.pause()
             assert str(screen.query_one("#extra-args-error").render()) == ""
+            await wait_for(pilot, lambda: not screen.query_one("#settings-save", Button).has_class("-active"))
             await pilot.click("#settings-save")
-            await pilot.pause()
+            await wait_for(pilot, lambda: app.screen is not screen)
             assert settings.ytdlp_extra_args == "--proxy socks5://h:1"
             assert settings.ffmpeg_path == "/opt/ffmpeg"
 

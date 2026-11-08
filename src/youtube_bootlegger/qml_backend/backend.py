@@ -11,6 +11,7 @@ from PySide6.QtCore import (
     Slot,
 )
 
+from ..app_logic.runtime_tools import WAITING_FOR_YTDLP
 from ..app_logic import (
     AI_PROVIDERS_NOTE,
     LOG_AI_REQUESTS_LABEL,
@@ -97,7 +98,6 @@ class AppBackend(QObject):
     progressPercentChanged = Signal()
     progressStageChanged = Signal()
     defaultTemplateChanged = Signal()
-    useExternalYtdlpChanged = Signal()
     ytdlpPathChanged = Signal()
     ytdlpExtraArgsChanged = Signal()
     ytdlpExtraArgsErrorChanged = Signal()
@@ -152,7 +152,6 @@ class AppBackend(QObject):
     progressPercent = Property(float, _getter("_progress_percent"), notify=progressPercentChanged)
     progressStage = Property(str, _getter("_progress_stage"), notify=progressStageChanged)
     defaultTemplate = Property(str, _getter("_default_template"), notify=defaultTemplateChanged)
-    useExternalYtdlp = Property(bool, _getter("_use_external_ytdlp"), notify=useExternalYtdlpChanged)
     ytdlpPath = Property(str, _getter("_ytdlp_path"), notify=ytdlpPathChanged)
     ytdlpExtraArgs = Property(str, _getter("_ytdlp_extra_args"), notify=ytdlpExtraArgsChanged)
     ytdlpExtraArgsError = Property(
@@ -256,7 +255,6 @@ class AppBackend(QObject):
         self._progress_stage = "Ready"
 
         self._app_settings = settings if settings is not None else get_settings()
-        self._use_external_ytdlp = self._app_settings.use_external_ytdlp
         self._ytdlp_path = self._app_settings.ytdlp_path
         self._ytdlp_extra_args = self._app_settings.ytdlp_extra_args
         self._ytdlp_extra_args_error = ""
@@ -309,16 +307,14 @@ class AppBackend(QObject):
         self._tools = ToolsBackend(
             self._app_settings, self._thread_pool, http_get=tools_http_get, parent=self
         )
-        # The external-yt-dlp default turns on once yt-dlp is downloaded.
-        self._tools.changed.connect(self._sync_use_external_ytdlp)
+        self._tools.changed.connect(self._on_tools_changed)
         self._tools.checkAutoDownload()
 
     # ── Private helpers ─────────────────────────────────────────────
 
-    def _sync_use_external_ytdlp(self):
-        self._emit(
-            "_use_external_ytdlp", self._app_settings.use_external_ytdlp, self.useExternalYtdlpChanged
-        )
+    def _on_tools_changed(self):
+        if self._tools.resume_video_info(self._url):
+            self._fetch_video_info()
 
     def _emit(self, attr, value, signal):
         if getattr(self, attr) != value:
@@ -435,15 +431,6 @@ class AppBackend(QObject):
             self._video_request_id += 1
             self._emit("_url_error", "", self.urlErrorChanged)
             self._url_debounce.start(self.URL_DEBOUNCE_MS)
-
-    @Slot(bool)
-    def setUseExternalYtdlp(self, enabled):
-        before = fetch_config(self._app_settings)
-        self._app_settings.use_external_ytdlp = enabled
-        self._app_settings.sync()
-        self._emit("_use_external_ytdlp", enabled, self.useExternalYtdlpChanged)
-        self._maybe_refetch_video_info(before)
-        self._tools.checkAutoDownload()
 
     @Slot(str)
     def setYtdlpPath(self, path):
@@ -782,8 +769,11 @@ class AppBackend(QObject):
         if url == self._last_fetched_url:
             return
 
-        self._last_fetched_url = url
         self._set_video_loading()
+        if self._tools.defer_video_info(url):
+            self._emit("_video_title", WAITING_FOR_YTDLP, self.videoTitleChanged)
+            return
+        self._last_fetched_url = url
 
         self._video_request_id += 1
         request_id = self._video_request_id

@@ -300,7 +300,6 @@ def test_nothing_installed_and_nothing_on_path(server, tools_dir, monkeypatch):
     assert [s.needs_download for s in settings.tool_statuses()] == [True, True, True]
     assert settings.resolved_ffmpeg_command() == "ffmpeg"
     assert settings.resolved_ytdlp_command() == "yt-dlp"
-    assert not settings.use_external_ytdlp
 
 
 def test_ffmpeg_and_deno_on_path_save_the_download_but_ytdlp_does_not(server, tools_dir, monkeypatch):
@@ -365,7 +364,6 @@ def test_downloaded_tools_win_over_path_and_custom_paths_win_over_both(server, t
     settings = settings_with(tools_dir)
     store = settings.tool_store
     assert all(s.source == ToolSource.DOWNLOADED for s in settings.tool_statuses())
-    assert settings.use_external_ytdlp  # downloaded yt-dlp becomes the default
     assert settings.resolved_ytdlp_command() == str(store.executable("yt-dlp"))
     assert AudioSplitter(settings=settings)._ffmpeg_command == str(store.executable("ffmpeg"))
 
@@ -374,13 +372,6 @@ def test_downloaded_tools_win_over_path_and_custom_paths_win_over_both(server, t
     assert settings.resolved_ytdlp_command() == "/custom/yt-dlp"
     assert settings.resolved_ffmpeg_command() == "/custom/ffmpeg"
     assert _status(settings, "ffmpeg").source == ToolSource.CUSTOM
-
-
-def test_explicit_library_preference_is_kept(server, tools_dir):
-    install_fake_tools(tools_dir, server)
-    settings = settings_with(tools_dir)
-    settings.use_external_ytdlp = False
-    assert not settings.use_external_ytdlp
 
 
 # --- companion paths passed to yt-dlp --------------------------------------------
@@ -398,7 +389,6 @@ def test_ytdlp_from_path_is_not_given_js_runtimes(server, tools_dir, monkeypatch
     fake_path(monkeypatch, {"yt-dlp"})
     install_fake_tools(tools_dir, server, ["deno", "ffmpeg"])
     settings = settings_with(tools_dir)
-    settings.use_external_ytdlp = True
     assert settings.resolved_ytdlp_command() == "yt-dlp"
     assert "--js-runtimes" not in settings.ytdlp_tool_cli_args()
 
@@ -409,18 +399,6 @@ def test_custom_ytdlp_is_not_given_js_runtimes(installed):
     args = installed.ytdlp_tool_cli_args()
     assert "--js-runtimes" not in args
     assert "--ffmpeg-location" in args
-
-
-def test_metadata_library_gets_companion_paths(installed, monkeypatch):
-    installed.use_external_ytdlp = False
-    ydl = MagicMock()
-    ydl.return_value.__enter__.return_value.extract_info.return_value = {"id": "abc"}
-    monkeypatch.setattr(ytdlp_metadata.yt_dlp, "YoutubeDL", ydl)
-    assert ytdlp_metadata.fetch_info_dict("https://youtu.be/abc", installed)["id"] == "abc"
-    options = ydl.call_args.args[0]
-    store = installed.tool_store
-    assert options["ffmpeg_location"] == str(store.executable("ffmpeg"))
-    assert options["js_runtimes"] == {"deno": {"path": str(store.executable("deno"))}}
 
 
 def test_metadata_cli_gets_companion_paths(installed, monkeypatch):

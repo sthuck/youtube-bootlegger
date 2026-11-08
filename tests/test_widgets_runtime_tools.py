@@ -35,7 +35,7 @@ from src.youtube_bootlegger.core.settings import AppSettings
 from src.youtube_bootlegger.ui import main_window as main_window_module
 from src.youtube_bootlegger.ui.widgets.settings_dialog import SettingsDialog
 from tests.qml_support import DictBackend, make_video, wait_until
-from tests.tools_support import fake_path, install_fake_tools, use_fake_tools
+from tests.tools_support import fake_path, install_fake_tools, use_fake_tools, video_requiring_ytdlp
 
 
 class FakeMessageBox:
@@ -139,6 +139,24 @@ def tools_warnings() -> list[str]:
     return [text for kind, title, text in FakeMessageBox.shown if title == "Tools Missing"]
 
 
+def test_preview_waits_for_ytdlp_install(open_main_window, server, monkeypatch):
+    from src.youtube_bootlegger.workers import video_info_worker
+    from tests.qml_support import VALID_URL
+
+    calls = video_requiring_ytdlp(monkeypatch, video_info_worker)
+    fake_path(monkeypatch)
+    server.hold()
+    window = open_main_window()
+    wait_until(lambda: server.requests)
+    child(window, QLineEdit, "urlField").setText(VALID_URL)
+    wait_until(lambda: any("Waiting for yt-dlp" in label.text() for label in window.findChildren(QLabel)))
+    assert calls == []
+
+    server.release()
+    wait_until(lambda: any(label.text() == VALID_URL for label in window.findChildren(QLabel)))
+    assert calls == [VALID_URL]
+
+
 def test_first_launch_downloads_by_itself_then_hides_banner(open_main_window, server, tools_dir, monkeypatch):
     fake_path(monkeypatch, set())
     server.hold()
@@ -236,9 +254,10 @@ def fill_form(window, output_dir) -> None:
 
 
 def test_start_while_ffmpeg_missing_shows_reason_and_does_not_start(
-    open_main_window, server, fake_video, fake_pipeline, tmp_path, monkeypatch
+    open_main_window, server, fake_video, fake_pipeline, tmp_path, tools_dir, monkeypatch
 ):
     fake_path(monkeypatch, set())
+    install_fake_tools(tools_dir, server, ("yt-dlp",))
     server.hold()
     window = open_main_window()
     fill_form(window, tmp_path)
@@ -271,7 +290,7 @@ def test_start_with_ffmpeg_not_downloadable_explains(widgets_app, monkeypatch, f
 
     click(child(window, QPushButton, "startButton"))
 
-    assert tools_warnings() == ["FFmpeg not found. Install it, or set its path in Settings."]
+    assert tools_warnings() == ["yt-dlp and FFmpeg not found. Install it, or set its path in Settings."]
     assert fake_pipeline.instances == []
     window.close()
     window.deleteLater()
@@ -391,23 +410,6 @@ def test_saving_settings_downloads_what_is_now_missing(
     wait_until(lambda: installed(tools_dir, "ffmpeg"), 5000)
     wait_until(lambda: not banner_shown(window), 5000)
     assert server.requests == [server.specs["ffmpeg"].assets[0].url]
-
-
-def test_saving_settings_mid_download_keeps_the_downloaded_ytdlp_default(
-    open_main_window, server, tools_dir, store, monkeypatch
-):
-    """Saving Settings before yt-dlp arrives must not store "external off" for good."""
-    fake_path(monkeypatch, {"ffmpeg", "ffprobe", "deno"})
-    server.hold()
-    window = open_main_window()
-    wait_until(lambda: server.requests)
-
-    in_settings(window, lambda dialog: None, save=True)
-
-    server.release()
-    wait_until(lambda: installed(tools_dir, "yt-dlp"), 5000)
-    wait_until(lambda: not banner_shown(window), 5000)
-    assert AppSettings(store, tools_dir=tools_dir).use_external_ytdlp is True
 
 
 def test_open_folder_survives_a_folder_that_cannot_be_created(

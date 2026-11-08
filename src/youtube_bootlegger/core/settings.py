@@ -13,7 +13,6 @@ from .ytdlp_extra_args import parse_extra_args
 _ORG_NAME = "YouTubeBootlegger"
 _APP_NAME = "YouTubeBootlegger"
 
-_USE_EXTERNAL_KEY = "ytdlp/use_external"
 _YTDLP_PATH_KEY = "ytdlp/path"
 _COOKIES_FROM_BROWSER_KEY = "ytdlp/cookies_from_browser"
 _YTDLP_EXTRA_ARGS_KEY = "ytdlp/extra_args"
@@ -122,11 +121,8 @@ class AppSettings:
     """Wraps a settings backend to persist user-configurable tool paths.
 
     Settings:
-        use_external_ytdlp: When enabled, invoke the yt-dlp CLI binary via
-            subprocess instead of the bundled yt-dlp Python library.
-        ytdlp_path: Custom path to the yt-dlp executable. Only consulted
-            when use_external_ytdlp is enabled. When empty, prefer the
-            downloaded executable, then "yt-dlp" on PATH.
+        ytdlp_path: Custom path to the yt-dlp executable. When empty, prefer
+            the downloaded executable, then "yt-dlp" on PATH.
         ffmpeg_path: Custom path to FFmpeg. When empty, prefer the
             downloaded executable, then "ffmpeg" on PATH.
 
@@ -171,15 +167,6 @@ class AppSettings:
         ]
 
     @property
-    def use_external_ytdlp(self) -> bool:
-        default = self.tool_store.executable("yt-dlp") is not None
-        return _to_bool(self._backend.value(_USE_EXTERNAL_KEY, default))
-
-    @use_external_ytdlp.setter
-    def use_external_ytdlp(self, enabled: bool) -> None:
-        self._backend.setValue(_USE_EXTERNAL_KEY, bool(enabled))
-
-    @property
     def ytdlp_path(self) -> str:
         return str(self._backend.value(_YTDLP_PATH_KEY, "") or "")
 
@@ -197,13 +184,6 @@ class AppSettings:
             _COOKIES_FROM_BROWSER_KEY,
             _parse_cookie_browser(browser).value,
         )
-
-    def ytdlp_cookie_options(self) -> dict[str, Any]:
-        """Return yt-dlp Python API option dict for browser cookie extraction."""
-        browser = self.cookies_from_browser
-        if browser != CookieBrowser.NONE:
-            return {"cookiesfrombrowser": (browser.value,)}
-        return {}
 
     def ytdlp_cookie_cli_args(self) -> list[str]:
         """Return yt-dlp CLI arguments for browser cookie extraction."""
@@ -224,9 +204,9 @@ class AppSettings:
         parse_extra_args(text)
         self._backend.setValue(_YTDLP_EXTRA_ARGS_KEY, text)
 
-    def ytdlp_extra_options(self) -> dict[str, Any]:
-        """The extra options as Python API options. Raises ValidationError."""
-        return parse_extra_args(self.ytdlp_extra_args)[1]
+    def ytdlp_extra_cli_args(self) -> list[str]:
+        """The extra options as command-line arguments. Raises ValidationError."""
+        return parse_extra_args(self.ytdlp_extra_args)
 
     def ytdlp_config_cli_args(self) -> list[str]:
         """Arguments that go right after the yt-dlp executable. Raises ValidationError.
@@ -238,7 +218,7 @@ class AppSettings:
         its config too. Extra options from Settings apply either way.
         """
         ignore = [] if self.ytdlp_path else ["--ignore-config"]
-        return ignore + parse_extra_args(self.ytdlp_extra_args)[0]
+        return ignore + self.ytdlp_extra_cli_args()
 
     @property
     def ffmpeg_path(self) -> str:
@@ -249,30 +229,19 @@ class AppSettings:
         self._backend.setValue(_FFMPEG_PATH_KEY, (path or "").strip())
 
     def resolved_ytdlp_command(self) -> str:
-        """Return the yt-dlp executable to invoke when running in external mode."""
+        """Return the yt-dlp executable to invoke."""
         return self.ytdlp_path or str(self.tool_store.executable("yt-dlp") or "yt-dlp")
 
     def resolved_ffmpeg_command(self) -> str:
         """Return the ffmpeg executable to invoke."""
         return self.ffmpeg_path or str(self.tool_store.executable("ffmpeg") or "ffmpeg")
 
-    def ytdlp_tool_options(self) -> dict[str, Any]:
-        """Explicit companion tool locations for the Python API."""
-        options: dict[str, Any] = {}
-        ffmpeg = self.resolved_ffmpeg_command()
-        if ffmpeg != "ffmpeg":
-            options["ffmpeg_location"] = ffmpeg
-        deno = self.tool_store.executable("deno")
-        if deno:
-            options["js_runtimes"] = {"deno": {"path": str(deno)}}
-        return options
-
     def ytdlp_tool_cli_args(self) -> list[str]:
         """Explicit companion paths; argv lists preserve spaces on every OS."""
-        options = self.ytdlp_tool_options()
         args = ["--encoding", "utf-8"]
-        if "ffmpeg_location" in options:
-            args.extend(["--ffmpeg-location", options["ffmpeg_location"]])
+        ffmpeg = self.resolved_ffmpeg_command()
+        if ffmpeg != "ffmpeg":
+            args.extend(["--ffmpeg-location", ffmpeg])
         # Only the downloaded (pinned) yt-dlp is known to accept --js-runtimes.
         # A user-chosen or PATH copy may predate it (2025.11) and would reject
         # it. Such a copy only finds a Deno on PATH, not the downloaded one:
@@ -281,8 +250,9 @@ class AppSettings:
         runs_downloaded = (
             downloaded_ytdlp is not None and self.resolved_ytdlp_command() == str(downloaded_ytdlp)
         )
-        if "js_runtimes" in options and runs_downloaded:
-            args.extend(["--js-runtimes", f"deno:{options['js_runtimes']['deno']['path']}"])
+        deno = self.tool_store.executable("deno")
+        if deno and runs_downloaded:
+            args.extend(["--js-runtimes", f"deno:{deno}"])
         return args
 
     @property

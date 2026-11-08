@@ -35,10 +35,6 @@ class FakeSettingsBackend:
 class TestAppSettingsDefaults:
     """Tests for AppSettings default values."""
 
-    def test_use_external_ytdlp_defaults_to_false(self):
-        settings = AppSettings(FakeSettingsBackend())
-        assert settings.use_external_ytdlp is False
-
     def test_ytdlp_path_defaults_to_empty(self):
         settings = AppSettings(FakeSettingsBackend())
         assert settings.ytdlp_path == ""
@@ -50,18 +46,6 @@ class TestAppSettingsDefaults:
 
 class TestAppSettingsRoundTrip:
     """Tests for setting and reading back values."""
-
-    def test_use_external_ytdlp_round_trip(self):
-        settings = AppSettings(FakeSettingsBackend())
-        settings.use_external_ytdlp = True
-        assert settings.use_external_ytdlp is True
-
-    def test_use_external_ytdlp_accepts_string_bool_from_backend(self):
-        """QSettings on some platforms round-trips bools through strings."""
-        backend = FakeSettingsBackend()
-        backend.setValue("ytdlp/use_external", "true")
-        settings = AppSettings(backend)
-        assert settings.use_external_ytdlp is True
 
     def test_ytdlp_path_round_trip(self):
         settings = AppSettings(FakeSettingsBackend())
@@ -198,14 +182,12 @@ class TestCookieBrowserSettings:
     def test_cookies_from_browser_defaults_to_none(self):
         settings = AppSettings(FakeSettingsBackend())
         assert settings.cookies_from_browser == CookieBrowser.NONE
-        assert settings.ytdlp_cookie_options() == {}
         assert settings.ytdlp_cookie_cli_args() == []
 
     def test_cookies_from_browser_round_trip(self):
         settings = AppSettings(FakeSettingsBackend())
         settings.cookies_from_browser = CookieBrowser.FIREFOX
         assert settings.cookies_from_browser == CookieBrowser.FIREFOX
-        assert settings.ytdlp_cookie_options() == {"cookiesfrombrowser": ("firefox",)}
         assert settings.ytdlp_cookie_cli_args() == ["--cookies-from-browser", "firefox"]
 
     def test_cookies_from_browser_normalizes_and_rejects_invalid(self):
