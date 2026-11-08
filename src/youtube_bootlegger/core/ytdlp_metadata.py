@@ -1,16 +1,14 @@
-"""Fetch yt-dlp metadata for one video, via the bundled library or an external executable.
+"""Fetch yt-dlp metadata for one video by running the yt-dlp executable.
 
-This is the only place that asks yt-dlp for metadata, so the library and
-external-executable modes stay in parity and share error handling.
+This is the only place that asks yt-dlp for metadata.
 """
 
 import json
 import subprocess
 
-import yt_dlp
-
 from .exceptions import ValidationError
 from .settings import AppSettings, format_ytdlp_age_or_cookie_error
+from .ytdlp_extra_args import option_error, youtube_extractor_args
 
 METADATA_TIMEOUT_SECONDS = 30
 # Comment extraction pages through many extra requests.
@@ -23,7 +21,7 @@ def fetch_info_dict(url: str, settings: AppSettings, *, comment_limit: int = 0) 
 
     Args:
         url: Video URL. Playlist parameters are ignored.
-        settings: Selects the bundled library or the external executable.
+        settings: Which yt-dlp to run, and its options.
         comment_limit: When positive, also fetch up to this many top-level
             comments into info["comments"], in YouTube's Top order, in the
             same request. If only the comments fail, the metadata is still
@@ -43,10 +41,7 @@ def fetch_info_dict(url: str, settings: AppSettings, *, comment_limit: int = 0) 
 
 
 def _fetch(url: str, settings: AppSettings, comment_limit: int) -> dict:
-    if settings.use_external_ytdlp:
-        info = _fetch_external(url, settings, comment_limit)
-    else:
-        info = _fetch_library(url, comment_limit, settings)
+    info = _fetch_external(url, settings, comment_limit)
     if not _is_single_video(info):
         raise ValidationError("Expected information for a single video")
     return info
@@ -67,42 +62,8 @@ def _comment_extractor_args(settings: AppSettings, comment_limit: int) -> dict[s
 
     yt-dlp replaces, not merges, a second set of args for the same site.
     """
-    extra = settings.ytdlp_extra_options().get("extractor_args", {}).get("youtube", {})
+    extra = youtube_extractor_args(settings.ytdlp_extra_cli_args())
     return {**extra, "comment_sort": ["top"], "max_comments": _max_comments(comment_limit)}
-
-
-def _fetch_library(url: str, comment_limit: int, settings: AppSettings):
-    options = {
-        **settings.ytdlp_extra_options(),
-        "quiet": True,
-        "no_warnings": True,
-        "noplaylist": True,
-        "skip_download": True,
-        **settings.ytdlp_cookie_options(),
-        **settings.ytdlp_tool_options(),
-    }
-    if comment_limit:
-        options.update({
-            "getcomments": True,
-            "socket_timeout": COMMENTS_SOCKET_TIMEOUT_SECONDS,
-            "retries": 1,
-            "extractor_retries": 1,
-            "extractor_args": {
-                **options.get("extractor_args", {}),
-                "youtube": _comment_extractor_args(settings, comment_limit),
-            },
-        })
-
-    try:
-        with yt_dlp.YoutubeDL(options) as ydl:
-            return ydl.extract_info(url, download=False)
-    except yt_dlp.utils.DownloadError as e:
-        raise _fetch_error(str(e), settings) from e
-    except Exception as e:
-        friendly = format_ytdlp_age_or_cookie_error(str(e), settings)
-        if friendly:
-            raise ValidationError(friendly) from e
-        raise ValidationError(f"Error fetching video info: {e}") from e
 
 
 def _fetch_external(url: str, settings: AppSettings, comment_limit: int):
@@ -113,7 +74,8 @@ def _fetch_external(url: str, settings: AppSettings, comment_limit: int):
     try:
         return json.loads(result.stdout)
     except ValueError as e:
-        raise ValidationError("Could not parse yt-dlp output") from e
+        hint = " Check Extra yt-dlp options in Settings." if settings.ytdlp_extra_args.strip() else ""
+        raise ValidationError("yt-dlp did not return valid video information." + hint) from e
 
 
 def _run_external(url: str, settings: AppSettings, comment_limit: int):
@@ -137,7 +99,7 @@ def _run_external(url: str, settings: AppSettings, comment_limit: int):
             "--extractor-retries", "1",
             "--extractor-args",
             "youtube:" + ";".join(
-                f"{key}={','.join(values)}"
+                f"{key}={','.join(value.replace(',', r'\,') for value in values)}"
                 for key, values in _comment_extractor_args(settings, comment_limit).items()
             ),
         ]
@@ -164,7 +126,9 @@ def _run_external(url: str, settings: AppSettings, comment_limit: int):
 
 def _fetch_error(message: str, settings: AppSettings) -> ValidationError:
     """Turn a yt-dlp failure message into a user-facing error."""
-    friendly = format_ytdlp_age_or_cookie_error(message, settings)
+    friendly = option_error(message, settings.ytdlp_extra_args) or (
+        format_ytdlp_age_or_cookie_error(message, settings)
+    )
     if friendly:
         return ValidationError(friendly)
     lowered = message.lower()

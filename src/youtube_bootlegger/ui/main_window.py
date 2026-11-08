@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..app_logic.runtime_tools import WAITING_FOR_YTDLP
 from ..app_logic import (
     AiButtonMode,
     CancelReason,
@@ -415,6 +416,8 @@ class MainWindow(QMainWindow):
             self._settings_dialog.refresh_tools(
                 self._tools.downloading, self._tools.session.statuses()
             )
+        if self._tools.session.resume_video_info(self._url_input.get_url()):
+            self._fetch_video_info()
 
     def closeEvent(self, event) -> None:
         """Stop a running tool download when the window closes."""
@@ -454,8 +457,11 @@ class MainWindow(QMainWindow):
         if url == self._last_fetched_url:
             return
 
-        self._last_fetched_url = url
         self._video_preview.set_loading()
+        if self._tools.session.defer_video_info(url):
+            self._video_preview.set_loading(WAITING_FOR_YTDLP)
+            return
+        self._last_fetched_url = url
 
         worker = VideoInfoWorker(
             url, self._settings, comment_limit=preview_comment_limit(self._settings)

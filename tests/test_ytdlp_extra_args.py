@@ -5,14 +5,13 @@ import subprocess
 from unittest.mock import MagicMock
 
 import pytest
-import yt_dlp
 
 from src.youtube_bootlegger.app_logic import fetch_config, should_refetch_video_info
 from src.youtube_bootlegger.core import ytdlp_metadata
 from src.youtube_bootlegger.core.downloader import AudioDownloader
-from src.youtube_bootlegger.core.exceptions import ValidationError
+from src.youtube_bootlegger.core.exceptions import DownloadError, ValidationError
 from src.youtube_bootlegger.core.settings import AppSettings
-from src.youtube_bootlegger.core.ytdlp_extra_args import parse_extra_args
+from src.youtube_bootlegger.core.ytdlp_extra_args import parse_extra_args, youtube_extractor_args
 from tests.qml_support import DictBackend
 from tests.tools_support import fake_path, install_fake_tools, use_fake_tools
 
@@ -21,21 +20,12 @@ URL = "https://youtu.be/abc"
 
 @pytest.fixture
 def installed(tmp_path, monkeypatch):
-    """Every tool downloaded; yt-dlp runs as an external program."""
+    """Every tool downloaded."""
     fake_path(monkeypatch)
     tools_dir = tmp_path / "tools"
     install_fake_tools(tools_dir, use_fake_tools(monkeypatch))
     settings = AppSettings(DictBackend(), tools_dir=tools_dir)
-    settings.use_external_ytdlp = True
     return settings
-
-
-def fake_youtube_dl(info) -> MagicMock:
-    """A YoutubeDL double; yt-dlp's option parser still needs its validate_outtmpl."""
-    ydl = MagicMock()
-    ydl.validate_outtmpl = yt_dlp.YoutubeDL.validate_outtmpl
-    ydl.return_value.__enter__.return_value.extract_info.return_value = info
-    return ydl
 
 
 def run_external_download(settings, tmp_path, monkeypatch) -> list[str]:
@@ -58,31 +48,46 @@ def run_external_metadata(settings, monkeypatch, comment_limit=0) -> list[str]:
 # --- checking what the user typed ----------------------------------------------
 
 
-def test_options_become_python_api_options_too():
-    args, options = parse_extra_args("--proxy socks5://127.0.0.1:9050  --limit-rate 2M")
+def test_options_become_command_line_arguments():
+    args = parse_extra_args("--proxy socks5://127.0.0.1:9050  --limit-rate 2M")
     assert args == ["--proxy", "socks5://127.0.0.1:9050", "--limit-rate", "2M"]
-    assert options == {"proxy": "socks5://127.0.0.1:9050", "ratelimit": 2 * 1024 * 1024}
 
 
 def test_windows_paths_keep_their_backslashes():
-    args, _options = parse_extra_args(r'--cookies C:\Users\Me\cookies.txt --cache-dir "D:\My cache"')
+    args = parse_extra_args(r'--cookies C:\Users\Me\cookies.txt --cache-dir "D:\My cache"')
     assert args == ["--cookies", r"C:\Users\Me\cookies.txt", "--cache-dir", r"D:\My cache"]
 
 
 def test_empty_text_adds_nothing():
-    assert parse_extra_args("   ") == ([], {})
+    assert parse_extra_args("   ") == []
+
+
+@pytest.mark.parametrize("video", [
+    "youtu.be/dQw4w9WgXcQ", "www.youtube.com/watch?v=dQw4w9WgXcQ",
+    "youtube.com/live/dQw4w9WgXcQ", "dQw4w9WgXcQ",
+])
+def test_extra_video_arguments_are_rejected(video):
+    for text in (video, f"--limit-rate 2M {video}", f"--no-playlist {video}", f"-v {video}"):
+        with pytest.raises(ValidationError, match="only options, no video URLs"):
+            parse_extra_args(text)
+
+
+def test_video_id_shaped_option_values_are_kept():
+    assert parse_extra_args("--username dQw4w9WgXcQ") == ["--username", "dQw4w9WgXcQ"]
 
 
 @pytest.mark.parametrize(
     ("text", "message"),
     [
-        ("--bogus", "Extra yt-dlp options: no such option: --bogus."),
-        ("--limit-rate", "Extra yt-dlp options: --limit-rate option requires 1 argument."),
         ('--proxy "socks5://x', "Extra yt-dlp options: a quote is not closed."),
         (f"--proxy socks5://x:1 {URL}", f"Extra yt-dlp options: only options, no video URLs ('{URL}')."),
+        (URL, f"Extra yt-dlp options: only options, no video URLs ('{URL}')."),
+        (f"--no-playlist {URL}", f"Extra yt-dlp options: only options, no video URLs ('{URL}')."),
         ("--proxy socks5://x:1 -o out.mp3", "Extra yt-dlp options: '-o' can't be used: the app sets this itself."),
         ("--exec 'rm x'", "Extra yt-dlp options: '--exec' can't be used: the app sets this itself."),
         ("-x", "Extra yt-dlp options: '-x' can't be used: the app sets this itself."),
+        ("-ofile.mp3", "Extra yt-dlp options: '-o' can't be used: the app sets this itself."),
+        ("--print=title", "Extra yt-dlp options: '--print' can't be used: the app sets this itself."),
         ("--print title", "Extra yt-dlp options: '--print' can't be used: the app sets this itself."),
         ("--download-archive seen.txt", "Extra yt-dlp options: '--download-archive' can't be used: the app sets this itself."),
         ("--ffmpeg-location /opt/ffmpeg", "Extra yt-dlp options: '--ffmpeg-location' can't be used: set the ffmpeg path instead."),
@@ -97,11 +102,23 @@ def test_rejected_options_name_the_culprit(text, message):
     assert str(error.value) == message
 
 
-def test_help_and_version_print_nothing(capsys):
-    for text in ("--help", "--version", "-hv"):
-        with pytest.raises(ValidationError):
-            parse_extra_args(text)
-    assert capsys.readouterr() == ("", "")
+@pytest.mark.parametrize("text", ["--help", "--version", "-hv", "-U"])
+def test_help_version_and_update_are_refused(text):
+    with pytest.raises(ValidationError, match="can't be used here"):
+        parse_extra_args(text)
+
+
+def test_proxy_urls_are_option_values_not_videos():
+    assert parse_extra_args("--proxy http://127.0.0.1:8080") == ["--proxy", "http://127.0.0.1:8080"]
+
+
+def test_youtube_extractor_args_are_read_as_ytdlp_reads_them():
+    args = parse_extra_args(
+        "--extractor-args youtube:player-client=web,tv;lang=en "
+        "--extractor-args=generic:impersonate --extractor-args YouTube:po_token=a\\,b"
+    )
+    assert youtube_extractor_args(args) == {"po_token": ["a,b"]}  # the last set wins
+    assert youtube_extractor_args(args[:2]) == {"player_client": ["web", "tv"], "lang": ["en"]}
 
 
 def test_rejected_text_is_not_stored():
@@ -150,32 +167,29 @@ def test_comment_lookup_keeps_the_users_youtube_extractor_args(installed, monkey
         "youtube:player_client=web,tv;comment_sort=top;max_comments=5,5,0,0"
     )
 
-    installed.use_external_ytdlp = False
-    ydl = fake_youtube_dl({"id": "abc"})
-    monkeypatch.setattr(ytdlp_metadata.yt_dlp, "YoutubeDL", ydl)
-    ytdlp_metadata.fetch_info_dict(URL, installed, comment_limit=5)
-    assert ydl.call_args.args[0]["extractor_args"] == {"youtube": {
-        "player_client": ["web", "tv"],
-        "comment_sort": ["top"],
-        "max_comments": ["5", "5", "0", "0"],
-    }}
+
+YTDLP_USAGE_ERROR = (
+    "Usage: yt-dlp [OPTIONS] URL [URL...]\n\n"
+    "yt-dlp: error: no such option: --no-such-option\n"
+)
 
 
-def test_library_mode_gets_the_extras_but_keeps_its_own_format(installed, tmp_path, monkeypatch):
-    installed.use_external_ytdlp = False
-    installed.ytdlp_extra_args = "--proxy socks5://127.0.0.1:9050 -S abr"
-    (tmp_path / "song.mp3").touch()
-    ydl = fake_youtube_dl({"id": "abc"})
-    ydl.return_value.__enter__.return_value.prepare_filename.return_value = str(tmp_path / "song.webm")
-    monkeypatch.setattr("src.youtube_bootlegger.core.downloader.yt_dlp.YoutubeDL", ydl)
-    AudioDownloader(output_dir=tmp_path, settings=installed).download(URL)
-    options = ydl.call_args.args[0]
-    assert options["proxy"] == "socks5://127.0.0.1:9050"
-    assert options["format_sort"] == ["abr"]
-    assert options["format"] == "bestaudio/best"
+def test_an_option_ytdlp_rejects_is_reported_by_name_when_downloading(installed, tmp_path, monkeypatch):
+    installed.ytdlp_extra_args = "--no-such-option"  # only yt-dlp knows its options
+    process = MagicMock(stdout=io.StringIO(YTDLP_USAGE_ERROR))
+    process.wait.return_value = 2
+    monkeypatch.setattr(
+        "src.youtube_bootlegger.core.cancellation.subprocess.Popen", MagicMock(return_value=process)
+    )
+    with pytest.raises(DownloadError) as error:
+        AudioDownloader(output_dir=tmp_path, settings=installed).download(URL)
+    assert str(error.value) == "Extra yt-dlp options: no such option: --no-such-option."
 
 
-def test_a_stored_value_yt_dlp_now_rejects_stops_with_its_reason(installed, tmp_path, monkeypatch):
-    installed._backend.setValue("ytdlp/extra_args", "--no-such-option")  # e.g. edited by hand
-    with pytest.raises(ValidationError, match="no such option: --no-such-option"):
-        run_external_download(installed, tmp_path, monkeypatch)
+def test_an_option_ytdlp_rejects_is_reported_by_name_when_fetching(installed, monkeypatch):
+    installed.ytdlp_extra_args = "--no-such-option"
+    run = MagicMock(return_value=subprocess.CompletedProcess([], 2, "", YTDLP_USAGE_ERROR))
+    monkeypatch.setattr(ytdlp_metadata.subprocess, "run", run)
+    with pytest.raises(ValidationError) as error:
+        ytdlp_metadata.fetch_info_dict(URL, installed)
+    assert str(error.value) == "Extra yt-dlp options: no such option: --no-such-option."

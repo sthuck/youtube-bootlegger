@@ -20,7 +20,7 @@ from src.youtube_bootlegger.tui import app as app_module
 from src.youtube_bootlegger.tui.screens import SettingsScreen
 from src.youtube_bootlegger.tui.widgets import StatusLog
 from tests.qml_support import DictBackend
-from tests.tools_support import fake_path, install_fake_tools, use_fake_tools
+from tests.tools_support import fake_path, install_fake_tools, use_fake_tools, video_requiring_ytdlp
 
 VALID_URL = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 SIZE = (140, 45)
@@ -127,6 +127,23 @@ def log_text(app) -> str:
 def installed(settings, tool_ids=ALL_TOOLS) -> bool:
     store = settings.tool_store
     return all(store.is_installed(tool_id) for tool_id in tool_ids)
+
+
+async def test_preview_waits_for_ytdlp_install(settings, server, monkeypatch):
+    calls = video_requiring_ytdlp(monkeypatch, app_module)
+    monkeypatch.setattr(app_module, "URL_DEBOUNCE_SECONDS", 0.01)
+    fake_path(monkeypatch)
+    server.hold()
+    app = make_app(settings, server)
+    async with app.run_test(size=SIZE) as pilot:
+        await wait_for(pilot, lambda: server.requests)
+        app.query_one("#url", Input).value = VALID_URL
+        await wait_for(pilot, lambda: "Waiting for yt-dlp" in text_of(app, "#video-title"))
+        assert calls == []
+
+        server.release()
+        await wait_for(pilot, lambda: text_of(app, "#video-title") == VALID_URL)
+        assert calls == [VALID_URL]
 
 
 async def fill_form(app, pilot):
@@ -247,7 +264,7 @@ class TestStartGating:
             await fill_form(app, pilot)
             await pilot.press("f5")
             await pilot.pause()
-            assert "Wait for FFmpeg to finish downloading." in log_text(app)
+            assert "Wait for yt-dlp and FFmpeg to finish downloading." in log_text(app)
             assert fake_pipeline.instances == []
             assert not app.busy
 
@@ -352,26 +369,6 @@ class TestSettingsSection:
             await pilot.press("ctrl+s")
             await wait_for(pilot, lambda: installed(settings, ("ffmpeg",)))
             assert [url.split("/")[-1] for url in server.requests] == ["ffmpeg-1.0.zip"]
-
-
-async def test_saving_settings_mid_download_keeps_the_downloaded_ytdlp_default(
-    backend, tools_dir, server, monkeypatch
-):
-    """Saving Settings before yt-dlp arrives must not store "external off" for good."""
-    settings = AppSettings(backend, tools_dir=tools_dir)
-    fake_path(monkeypatch, {"ffmpeg", "ffprobe", "deno"})
-    server.hold()
-    app = make_app(settings, server)
-    async with app.run_test(size=SIZE) as pilot:
-        await wait_for(pilot, lambda: server.requests)
-        await pilot.press("f2")
-        await wait_for(pilot, lambda: isinstance(app.screen, SettingsScreen))
-        await pilot.press("ctrl+s")
-        await wait_for(pilot, lambda: not isinstance(app.screen, SettingsScreen))
-        server.release()
-        await wait_for(pilot, lambda: installed(settings, ("yt-dlp",)))
-        await wait_for(pilot, lambda: not banner_shown(app))
-    assert AppSettings(backend, tools_dir=tools_dir).use_external_ytdlp is True
 
 
 async def test_quit_cancels_running_download(settings, server, monkeypatch, tools_dir):

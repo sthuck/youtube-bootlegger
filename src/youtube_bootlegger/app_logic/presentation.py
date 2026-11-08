@@ -99,7 +99,6 @@ def log_ai_requests_note(settings: AppSettings) -> str:
 class FetchConfig:
     """Settings that affect how yt-dlp fetches video metadata."""
 
-    use_external_ytdlp: bool
     ytdlp_path: str
     ytdlp_extra_args: str
     cookies_from_browser: CookieBrowser
@@ -108,7 +107,6 @@ class FetchConfig:
 def fetch_config(settings: AppSettings) -> FetchConfig:
     """Snapshot the settings that affect video metadata fetching."""
     return FetchConfig(
-        use_external_ytdlp=settings.use_external_ytdlp,
         ytdlp_path=settings.ytdlp_path,
         ytdlp_extra_args=settings.ytdlp_extra_args,
         cookies_from_browser=settings.cookies_from_browser,

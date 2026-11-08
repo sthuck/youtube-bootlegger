@@ -24,9 +24,8 @@ class FakeSettingsBackend:
         pass
 
 
-def make_settings(use_external=False, ytdlp_path="", ffmpeg_path=""):
+def make_settings(ytdlp_path="", ffmpeg_path=""):
     settings = AppSettings(FakeSettingsBackend())
-    settings.use_external_ytdlp = use_external
     settings.ytdlp_path = ytdlp_path
     settings.ffmpeg_path = ffmpeg_path
     return settings
@@ -108,32 +107,6 @@ class TestReportExternalProgress:
         downloader._report_external_progress("[download]  50.0% of ~10.00MiB")  # should not raise
 
 
-class TestDownloadDispatch:
-    """Tests that download() dispatches to the correct implementation."""
-
-    def test_uses_library_path_by_default(self, monkeypatch):
-        downloader = AudioDownloader(settings=make_settings(use_external=False))
-        monkeypatch.setattr(downloader, "_download_library", lambda url: Path("library.mp3"))
-        monkeypatch.setattr(
-            downloader,
-            "_download_external",
-            lambda url: (_ for _ in ()).throw(AssertionError("should not call external")),
-        )
-
-        assert downloader.download("https://youtu.be/abc") == Path("library.mp3")
-
-    def test_uses_external_path_when_enabled(self, monkeypatch):
-        downloader = AudioDownloader(settings=make_settings(use_external=True))
-        monkeypatch.setattr(downloader, "_download_external", lambda url: Path("external.mp3"))
-        monkeypatch.setattr(
-            downloader,
-            "_download_library",
-            lambda url: (_ for _ in ()).throw(AssertionError("should not call library")),
-        )
-
-        assert downloader.download("https://youtu.be/abc") == Path("external.mp3")
-
-
 class TestDownloadExternalMissingExecutable:
     """Tests for the error path when the external yt-dlp binary is missing."""
 
@@ -143,7 +116,7 @@ class TestDownloadExternalMissingExecutable:
         with tempfile.TemporaryDirectory() as tmpdir:
             downloader = AudioDownloader(
                 output_dir=Path(tmpdir),
-                settings=make_settings(use_external=True, ytdlp_path="/nonexistent/yt-dlp"),
+                settings=make_settings(ytdlp_path="/nonexistent/yt-dlp"),
             )
 
             try:
@@ -151,39 +124,6 @@ class TestDownloadExternalMissingExecutable:
                 assert False, "expected DownloadError"
             except DownloadError as e:
                 assert "/nonexistent/yt-dlp" in str(e)
-
-
-def test_library_warnings_reach_app_log(tmp_path, monkeypatch):
-    """Extraction warnings must remain visible even with quiet progress output."""
-    messages = []
-
-    class FakeYoutubeDL:
-        def __init__(self, options):
-            self.options = options
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            pass
-
-        def extract_info(self, url, download):
-            self.options["logger"].warning("No supported JavaScript runtime found")
-            (tmp_path / "song.mp3").write_bytes(b"audio")
-            return {"title": "song"}
-
-        def prepare_filename(self, info):
-            return str(tmp_path / "song.webm")
-
-    monkeypatch.setattr(
-        "src.youtube_bootlegger.core.downloader.yt_dlp.YoutubeDL", FakeYoutubeDL
-    )
-    downloader = AudioDownloader(
-        output_dir=tmp_path, log_callback=messages.append, settings=make_settings()
-    )
-
-    assert downloader.download("https://youtu.be/abc") == tmp_path / "song.mp3"
-    assert "WARNING: No supported JavaScript runtime found" in messages
 
 
 def test_external_executable_resolution_is_logged(tmp_path, monkeypatch):
@@ -203,7 +143,7 @@ def test_external_executable_resolution_is_logged(tmp_path, monkeypatch):
     downloader = AudioDownloader(
         output_dir=tmp_path,
         log_callback=messages.append,
-        settings=make_settings(use_external=True),
+        settings=make_settings(),
     )
 
     assert downloader.download("https://youtu.be/abc") == tmp_path / "song.mp3"
@@ -212,37 +152,18 @@ def test_external_executable_resolution_is_logged(tmp_path, monkeypatch):
     assert "--no-warnings" not in popen.call_args.args[0]
 
 
-def test_library_passes_cookies_from_browser(tmp_path, monkeypatch):
-    from src.youtube_bootlegger.core.settings import CookieBrowser
+def test_success_without_audio_explains_missing_output(tmp_path, monkeypatch):
+    from unittest.mock import Mock
+    import pytest
+    from src.youtube_bootlegger.core.exceptions import DownloadError
 
-    seen_options = []
-
-    class FakeYoutubeDL:
-        def __init__(self, options):
-            seen_options.append(options)
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            pass
-
-        def extract_info(self, url, download):
-            (tmp_path / "song.mp3").write_bytes(b"audio")
-            return {"title": "song"}
-
-        def prepare_filename(self, info):
-            return str(tmp_path / "song.webm")
-
-    monkeypatch.setattr(
-        "src.youtube_bootlegger.core.downloader.yt_dlp.YoutubeDL", FakeYoutubeDL
-    )
+    process = Mock(stdout=iter(["https://example.invalid/audio\n"]))
+    process.wait.return_value = 0
+    monkeypatch.setattr("src.youtube_bootlegger.core.downloader.subprocess.Popen", Mock(return_value=process))
     settings = make_settings()
-    settings.cookies_from_browser = CookieBrowser.FIREFOX
-    downloader = AudioDownloader(output_dir=tmp_path, settings=settings)
-
-    assert downloader.download("https://youtu.be/abc") == tmp_path / "song.mp3"
-    assert seen_options[0]["cookiesfrombrowser"] == ("firefox",)
+    settings.ytdlp_extra_args = "--get-url"
+    with pytest.raises(DownloadError, match="without creating an MP3 audio file.*Extra yt-dlp options.*download log"):
+        AudioDownloader(output_dir=tmp_path, settings=settings).download("https://youtu.be/abc")
 
 
 def test_external_passes_cookies_from_browser_and_handles_age_error(tmp_path, monkeypatch):
@@ -256,7 +177,7 @@ def test_external_passes_cookies_from_browser_and_handles_age_error(tmp_path, mo
     popen = Mock(return_value=process)
     monkeypatch.setattr("src.youtube_bootlegger.core.downloader.subprocess.Popen", popen)
 
-    settings = make_settings(use_external=True)
+    settings = make_settings()
     settings.cookies_from_browser = CookieBrowser.CHROME
     downloader = AudioDownloader(output_dir=tmp_path, settings=settings)
 

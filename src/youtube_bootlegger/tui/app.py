@@ -13,6 +13,7 @@ from textual.reactive import reactive
 from textual.timer import Timer
 from textual.widgets import Button, Footer, Header, Input, Label, Static, TextArea
 
+from ..app_logic.runtime_tools import WAITING_FOR_YTDLP
 from ..app_logic import (
     AiButtonMode,
     BannerAction,
@@ -272,6 +273,9 @@ class BootleggerApp(App[None]):
         )
 
     def _start_video_info_fetch(self, url: str) -> None:
+        if self._tools.session.defer_video_info(url):
+            self.query_one(VideoPanel).show_loading(WAITING_FOR_YTDLP)
+            return
         self._last_fetched_url = url
         self._video_info = None
         self._video_request_id += 1
@@ -643,6 +647,9 @@ class BootleggerApp(App[None]):
         for screen in self.screen_stack:
             if isinstance(screen, SettingsScreen):
                 screen.refresh_tools()
+        url = self.query_one("#url", Input).value.strip()
+        if self._tools.session.resume_video_info(url):
+            self._start_video_info_fetch(url)
 
     # ── Dialogs ─────────────────────────────────────────────────────
 

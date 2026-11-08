@@ -57,45 +57,11 @@ Item {
                 width: contentScroll.availableWidth
                 spacing: 16
 
-            /* ── use external yt-dlp toggle ── */
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: 10
-
-                Rectangle {
-                    width: 40; height: 22; radius: 11
-                    color: backend.useExternalYtdlp ? root.colors.accent : root.colors.inputBg
-                    border.color: root.colors.border; border.width: 1
-                    Behavior on color { ColorAnimation { duration: 150 } }
-
-                    Rectangle {
-                        objectName: "externalYtdlpKnob"
-                        width: 18; height: 18; radius: 9
-                        color: "white"
-                        anchors.verticalCenter: parent.verticalCenter
-                        x: backend.useExternalYtdlp ? parent.width - width - 2 : 2
-                        Behavior on x { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
-                    }
-
-                    MouseArea {
-                        objectName: "externalYtdlpToggle"
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: backend.setUseExternalYtdlp(!backend.useExternalYtdlp)
-                    }
-                }
-                Text { text: "Use external yt-dlp executable"; color: root.colors.text; font.pixelSize: 13 }
-            }
-
             /* ── yt-dlp path ── */
             ColumnLayout {
                 objectName: "ytdlpPathSection"
                 Layout.fillWidth: true
                 spacing: 4
-                enabled: backend.useExternalYtdlp
-                opacity: backend.useExternalYtdlp ? 1.0 : 0.4
-                Behavior on opacity { NumberAnimation { duration: 150 } }
-
                 Text { text: "yt-dlp path"; color: root.colors.textMuted; font.pixelSize: 12 }
                 RowLayout {
                     Layout.fillWidth: true

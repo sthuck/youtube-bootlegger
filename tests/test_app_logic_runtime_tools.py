@@ -39,13 +39,35 @@ def test_first_start_downloads_everything_missing_once(server, settings, monkeyp
 
     banner = session.banner()
     assert banner.action == BannerAction.CANCEL and banner.text == "Preparing tool download…"
-    assert session.start_blocked_reason() == "Wait for FFmpeg to finish downloading."
+    assert session.start_blocked_reason() == "Wait for yt-dlp and FFmpeg to finish downloading."
 
     run_download(session, settings, server, ids)
     assert session.phase == ToolsPhase.IDLE
     assert not session.banner().visible
     assert session.start_blocked_reason() is None
     assert session.auto_download_ids() == []  # a restart finds the past download
+
+
+@pytest.mark.parametrize("current_url", ["https://youtu.be/first", "https://youtu.be/second", ""])
+def test_waiting_preview_resumes_only_for_the_current_url(server, settings, monkeypatch, current_url):
+    fake_path(monkeypatch)
+    session = RuntimeToolsSession(settings)
+    ids = session.auto_download_ids()
+    assert session.defer_video_info("https://youtu.be/first")
+    assert not session.resume_video_info("https://youtu.be/first")
+    install_fake_tools(settings.tools_dir, server, ["yt-dlp"])
+    assert not session.resume_video_info("https://youtu.be/first")
+    run_download(session, settings, server, ids)
+    assert session.resume_video_info(current_url) == (current_url == "https://youtu.be/first")
+    assert not session.resume_video_info(current_url)
+
+
+def test_missing_custom_ytdlp_is_not_deferred_for_an_unrelated_download(server, settings, monkeypatch):
+    fake_path(monkeypatch)
+    settings.ytdlp_path = "/missing/custom/yt-dlp"
+    session = RuntimeToolsSession(settings)
+    session.auto_download_ids()
+    assert not session.defer_video_info("https://youtu.be/first")
 
 
 def test_only_ytdlp_is_fetched_when_ffmpeg_and_deno_are_on_path(server, settings, monkeypatch):
@@ -74,7 +96,7 @@ def test_cancel_waits_for_the_user_to_download_again(server, settings, monkeypat
     banner = session.banner()
     assert banner.action == BannerAction.DOWNLOAD and banner.action_label == "Download"
     assert banner.text.startswith("Download cancelled. yt-dlp, FFmpeg and Deno need a one-time download")
-    assert session.start_blocked_reason() == "FFmpeg not downloaded yet. Use Download in the banner."
+    assert session.start_blocked_reason() == "yt-dlp and FFmpeg not downloaded yet. Use Download in the banner."
     assert session.start() == ["yt-dlp", "ffmpeg", "deno"]
 
 
@@ -145,9 +167,8 @@ def test_custom_ffmpeg_path_that_does_not_exist_blocks_start(server, settings, m
     )
 
 
-def test_external_mode_needs_ytdlp(server, settings, monkeypatch):
+def test_start_needs_ytdlp(server, settings, monkeypatch):
     fake_path(monkeypatch, {"ffmpeg", "ffprobe"})
-    settings.use_external_ytdlp = True
     session = RuntimeToolsSession(settings)
     session.start()
     assert session.start_blocked_reason() == "Wait for yt-dlp to finish downloading."
@@ -159,8 +180,8 @@ def test_no_download_for_this_platform(monkeypatch):
     assert session.auto_download_ids() == []
     banner = session.banner()
     assert banner.is_error and banner.action == BannerAction.NONE
-    assert banner.text.startswith("FFmpeg can't be downloaded on this platform.")
-    assert session.start_blocked_reason() == "FFmpeg not found. Install it, or set its path in Settings."
+    assert banner.text.startswith("yt-dlp and FFmpeg can't be downloaded on this platform.")
+    assert session.start_blocked_reason() == "yt-dlp and FFmpeg not found. Install it, or set its path in Settings."
 
 
 def test_missing_ffprobe_is_named_where_nothing_can_be_downloaded(monkeypatch):

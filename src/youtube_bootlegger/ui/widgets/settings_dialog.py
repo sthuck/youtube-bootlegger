@@ -116,10 +116,6 @@ class SettingsDialog(QDialog):
         tools_form = QFormLayout(tools_group)
         tools_form.setSpacing(10)
 
-        self._use_external_checkbox = QCheckBox("Use external yt-dlp executable")
-        self._use_external_checkbox.toggled.connect(self._on_use_external_toggled)
-        tools_form.addRow(self._use_external_checkbox)
-
         self._ytdlp_path_input, ytdlp_row = self._make_path_row(
             "Select yt-dlp executable",
             placeholder=YTDLP_PATH_PLACEHOLDER,
@@ -326,10 +322,6 @@ class SettingsDialog(QDialog):
         if path:
             target.setText(path)
 
-    def _on_use_external_toggled(self, checked: bool) -> None:
-        """Enable the yt-dlp path field only when external mode is active."""
-        self._ytdlp_path_input.setEnabled(checked)
-
     def _on_llm_provider_changed(self, _button_id: int) -> None:
         self._update_llm_field_visibility()
 
@@ -354,15 +346,9 @@ class SettingsDialog(QDialog):
 
     def _load_settings(self) -> None:
         """Populate the form from the current persisted settings."""
-        # Remembered so Save only stores the switch when the user changed it:
-        # its default turns on once yt-dlp is downloaded, which may happen
-        # while this dialog is open.
-        self._loaded_use_external = self._settings.use_external_ytdlp
-        self._use_external_checkbox.setChecked(self._loaded_use_external)
         self._ytdlp_path_input.setText(self._settings.ytdlp_path)
         self._ffmpeg_path_input.setText(self._settings.ffmpeg_path)
         self._extra_args_input.setText(self._settings.ytdlp_extra_args)
-        self._ytdlp_path_input.setEnabled(self._settings.use_external_ytdlp)
         browser_index = self._cookies_browser_combo.findData(self._settings.cookies_from_browser)
         self._cookies_browser_combo.setCurrentIndex(max(0, browser_index))
 
@@ -402,8 +388,6 @@ class SettingsDialog(QDialog):
             self._extra_args_error.show()
             self._extra_args_input.setFocus()
             return
-        if self._use_external_checkbox.isChecked() != self._loaded_use_external:
-            self._settings.use_external_ytdlp = self._use_external_checkbox.isChecked()
         self._settings.ytdlp_path = self._ytdlp_path_input.text()
         self._settings.ffmpeg_path = self._ffmpeg_path_input.text()
         self._settings.ytdlp_extra_args = extra_args

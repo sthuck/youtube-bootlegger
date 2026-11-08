@@ -25,6 +25,7 @@ EXTRA_ARGS_NOTE = (
     "or what yt-dlp prints can't be used. yt-dlp config files are read only by a "
     "yt-dlp whose path you set."
 )
+WAITING_FOR_YTDLP = "Waiting for yt-dlp to finish downloading…"
 
 
 class ToolsPhase(StrEnum):
@@ -113,6 +114,32 @@ class RuntimeToolsSession:
         # Looked up once per download: progress ticks re-render often, and
         # nothing a lookup finds changes until the download ends.
         self._download_statuses: list[ToolStatus] | None = None
+        self._pending_video_url = ""
+
+    def defer_video_info(self, url: str) -> bool:
+        """Remember a preview to load once the first yt-dlp install is ready."""
+        self._pending_video_url = ""
+        installing_ytdlp = self.downloading and any(
+            status.tool_id == "yt-dlp" and status.source == ToolSource.MISSING
+            and status.needs_download for status in self.statuses()
+        )
+        if installing_ytdlp and not shutil.which(self._settings.resolved_ytdlp_command()):
+            self._pending_video_url = url
+            return True
+        return False
+
+    def resume_video_info(self, current_url: str) -> bool:
+        """Consume a waiting preview only if its URL is still current and yt-dlp exists."""
+        if self._pending_video_url != current_url:
+            self._pending_video_url = ""
+        # Companion tools (notably Deno) may still be installing after yt-dlp
+        # itself appears. Start the preview once the download has settled.
+        if not self._pending_video_url or self.downloading:
+            return False
+        if not shutil.which(self._settings.resolved_ytdlp_command()):
+            return False
+        self._pending_video_url = ""
+        return True
 
     @property
     def phase(self) -> ToolsPhase:
@@ -239,7 +266,7 @@ class RuntimeToolsSession:
         return HIDDEN_BANNER
 
     def start_blocked_reason(self, statuses: list[ToolStatus] | None = None) -> str | None:
-        """Why Start can't run now, or None. FFmpeg is always needed; yt-dlp in external mode."""
+        """Why Start can't run now, or None. FFmpeg and yt-dlp are always needed."""
         needed = self._needed(self.statuses() if statuses is None else statuses)
         for status in needed:
             if status.source == ToolSource.CUSTOM and not shutil.which(status.path):
@@ -258,9 +285,8 @@ class RuntimeToolsSession:
         return f"{names} not found. Install it, or set its path in Settings."
 
     def _needed(self, statuses: list[ToolStatus]) -> list[ToolStatus]:
-        """Tools Start can't run without: FFmpeg, and yt-dlp in external mode."""
-        needed = {"ffmpeg", "yt-dlp"} if self._settings.use_external_ytdlp else {"ffmpeg"}
-        return [s for s in statuses if s.tool_id in needed]
+        """Tools Start can't run without: FFmpeg and yt-dlp."""
+        return [s for s in statuses if s.tool_id in ("ffmpeg", "yt-dlp")]
 
     def _download_size(self, tool_ids: list[str]) -> int:
         specs = self._settings.tool_store.specs

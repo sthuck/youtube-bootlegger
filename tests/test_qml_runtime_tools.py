@@ -23,11 +23,13 @@ from tests.qml_support import (
     open_window,
     press_key,
     prop,
+    set_text,
     type_text,
     wait_for_workers,
     wait_until,
 )
-from tests.tools_support import fake_path, install_fake_tools, use_fake_tools
+from tests.tools_support import fake_path, install_fake_tools, use_fake_tools, video_requiring_ytdlp
+from tests.qml_support import VALID_URL, OTHER_URL
 
 ALL_TOOLS = ("yt-dlp", "ffmpeg", "deno")
 
@@ -76,6 +78,32 @@ def wait_banner_gone(window) -> None:
 
 
 class TestFirstLaunch:
+    @pytest.mark.parametrize("current_url", [VALID_URL, OTHER_URL, ""])
+    def test_url_entered_during_install_loads_afterwards(
+        self, qapp, server, store, tools_dir, monkeypatch, current_url
+    ):
+        from src.youtube_bootlegger.workers import video_info_worker
+        calls = video_requiring_ytdlp(monkeypatch, video_info_worker)
+        fake_path(monkeypatch)
+        server.hold()
+        with tools_window(store, tools_dir, server) as (window, backend):
+            wait_until(lambda: server.requests)
+            set_text(window, "urlField", VALID_URL)
+            wait_until(lambda: backend.videoError or prop(window, "videoTitleText") == (
+                "Waiting for yt-dlp to finish downloading…"
+            ))
+            assert calls == []
+            set_text(window, "urlField", current_url)
+            server.release()
+            wait_banner_gone(window)
+            if current_url:
+                wait_until(lambda: prop(window, "videoTitleText") == current_url)
+                assert calls == [current_url]
+            else:
+                wait_for_workers(backend)
+                assert calls == []
+            assert backend.videoError == ""
+
     def test_downloads_by_itself_shows_progress_then_unblocks_start(
         self, qapp, server, store, tools_dir, monkeypatch
     ):
@@ -88,7 +116,7 @@ class TestFirstLaunch:
             assert prop(window, "toolsBannerProgress", "visible") is True
             assert prop(window, "toolsBannerButtonText") == "Cancel"
             assert prop(window, "startButton", "enabled") is False
-            assert prop(window, "startBlockedText") == "Wait for FFmpeg to finish downloading."
+            assert prop(window, "startBlockedText") == "Wait for yt-dlp and FFmpeg to finish downloading."
 
             server.release()
             wait_banner_gone(window)
@@ -127,31 +155,6 @@ class TestFirstLaunch:
         assert not installed(tools_dir, server, ["ffmpeg"])
 
 
-def external_ytdlp_on(window) -> bool:
-    return prop(window, "externalYtdlpKnob", "x") > 2
-
-
-def test_ytdlp_toggle_turns_on_when_the_download_finishes(
-    qapp, server, store, tools_dir, monkeypatch
-):
-    """The downloaded yt-dlp becomes the default; the toggle must show it, and
-    one click must turn it off (it used to show off and need two clicks)."""
-    fake_path(monkeypatch, {"ffmpeg", "ffprobe", "deno"})
-    server.hold()
-    with tools_window(store, tools_dir, server) as (window, _backend):
-        open_settings(window)
-        wait_until(lambda: server.requests)
-        assert not external_ytdlp_on(window)
-
-        server.release()
-        wait_banner_gone(window)
-        wait_until(lambda: external_ytdlp_on(window))
-
-        click_item(window, "externalYtdlpToggle")
-        wait_until(lambda: not external_ytdlp_on(window))
-    assert AppSettings(store, tools_dir=tools_dir).use_external_ytdlp is False
-
-
 class TestBannerActions:
     def test_cancel_then_download_completes_the_install(
         self, qapp, server, store, tools_dir, monkeypatch
@@ -167,7 +170,7 @@ class TestBannerActions:
             assert prop(window, "toolsBannerButtonText") == "Download"
             assert prop(window, "toolsBannerProgress", "visible") is False
             assert prop(window, "startBlockedText") == (
-                "FFmpeg not downloaded yet. Use Download in the banner."
+                "yt-dlp and FFmpeg not downloaded yet. Use Download in the banner."
             )
             assert not installed(tools_dir, server)
 
@@ -216,7 +219,7 @@ class TestStartGating:
         server.hold()
         with tools_window(store, tools_dir, server) as (window, backend):
             wait_until(lambda: server.requests)
-            reason = "Wait for FFmpeg to finish downloading."
+            reason = "Wait for yt-dlp and FFmpeg to finish downloading."
             assert prop(window, "startButton", "enabled") is False
             assert prop(window, "startBlockedText") == reason
             assert prop(window, "startBlockedText", "visible") is True

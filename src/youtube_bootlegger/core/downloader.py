@@ -1,4 +1,4 @@
-"""YouTube audio downloader using yt-dlp."""
+"""YouTube audio downloader that runs the external yt-dlp executable."""
 
 import re
 import shlex
@@ -8,29 +8,12 @@ import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
-import yt_dlp
-
 from .cancellation import CancelToken
 from .exceptions import DownloadError, OperationCancelledError
 from .settings import AppSettings, format_ytdlp_age_or_cookie_error, get_settings
+from .ytdlp_extra_args import option_error
 
 _PROGRESS_RE = re.compile(r"\[download\]\s+(\d{1,3}(?:\.\d+)?)%")
-
-
-class _DownloadLogger:
-    """Forward yt-dlp diagnostics to the application's download log."""
-
-    def __init__(self, callback: Callable[[str], None]):
-        self._callback = callback
-
-    def debug(self, message: str) -> None:
-        self._callback(message)
-
-    def warning(self, message: str) -> None:
-        self._callback(f"WARNING: {message}")
-
-    def error(self, message: str) -> None:
-        self._callback(f"ERROR: {message}")
 
 
 class AudioDownloader:
@@ -78,100 +61,7 @@ class AudioDownloader:
             DownloadError: If the download fails.
             OperationCancelledError: If cancelled via the cancel token.
         """
-        if self._settings.use_external_ytdlp:
-            return self._download_external(url)
-        return self._download_library(url)
-
-    def _download_library(self, url: str) -> Path:
-        """Download using the bundled yt-dlp Python library."""
-        output_template = str(self._output_dir / "%(title)s.%(ext)s")
-
-        self._log(f"Download directory: {self._output_dir}")
-        self._log(f"yt-dlp library version: {yt_dlp.version.__version__}")
-
-        ydl_opts = {
-            **self._settings.ytdlp_extra_options(),
-            "format": "bestaudio/best",
-            "postprocessors": [
-                {
-                    "key": "FFmpegExtractAudio",
-                    "preferredcodec": "mp3",
-                    "preferredquality": "192",
-                }
-            ],
-            "outtmpl": output_template,
-            "progress_hooks": [self._progress_hook],
-            "postprocessor_hooks": [self._postprocessor_hook],
-            "quiet": True,
-            "logger": _DownloadLogger(self._log),
-            **self._settings.ytdlp_cookie_options(),
-            **self._settings.ytdlp_tool_options(),
-        }
-
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-                # yt-dlp's own mp3 conversion can't be interrupted; honour a
-                # cancel that arrived during it as soon as it returns.
-                self._cancel.raise_if_cancelled()
-                if info is None:
-                    raise DownloadError("Failed to extract video information")
-
-                filename = ydl.prepare_filename(info)
-                audio_path = Path(filename).with_suffix(".mp3")
-
-                if not audio_path.exists():
-                    raise DownloadError(f"Downloaded file not found: {audio_path}")
-
-                self._log(f"Downloaded to: {audio_path}")
-                return audio_path
-
-        except yt_dlp.utils.DownloadCancelled as e:
-            raise OperationCancelledError("Download cancelled") from e
-        except (OperationCancelledError, DownloadError):
-            raise
-        except yt_dlp.utils.DownloadError as e:
-            friendly = format_ytdlp_age_or_cookie_error(str(e), self._settings)
-            if friendly:
-                raise DownloadError(friendly) from e
-            raise DownloadError(f"Download failed: {e}") from e
-        except Exception as e:
-            friendly = format_ytdlp_age_or_cookie_error(str(e), self._settings)
-            if friendly:
-                raise DownloadError(friendly) from e
-            raise DownloadError(f"Unexpected error during download: {e}") from e
-
-    def _abort_if_cancelled(self) -> None:
-        """Raise yt-dlp's own cancel exception so it stops the download cleanly."""
-        if self._cancel.cancelled:
-            raise yt_dlp.utils.DownloadCancelled("Download cancelled")
-
-    def _postprocessor_hook(self, d: dict) -> None:
-        """Stop before yt-dlp starts converting if cancel arrived meanwhile."""
-        self._abort_if_cancelled()
-
-    def _progress_hook(self, d: dict) -> None:
-        """Handle yt-dlp progress updates (and abort when cancelled)."""
-        self._abort_if_cancelled()
-        if self._progress_callback is None:
-            return
-
-        status = d.get("status", "")
-
-        if status == "downloading":
-            total = d.get("total_bytes") or d.get("total_bytes_estimate", 0)
-            downloaded = d.get("downloaded_bytes", 0)
-            if total > 0:
-                percent = (downloaded / total) * 100
-                if percent - self._last_percent >= 1:
-                    self._last_percent = percent
-                    self._progress_callback(percent, "Downloading...")
-
-        elif status == "finished":
-            self._progress_callback(100, "Download complete, processing...")
-
-        elif status == "error":
-            self._progress_callback(0, "Download error")
+        return self._download_external(url)
 
     def _download_external(self, url: str) -> Path:
         """Download audio by invoking the external yt-dlp executable.
@@ -236,14 +126,20 @@ class AudioDownloader:
         self._cancel.raise_if_cancelled()
         if returncode != 0:
             tail = "\n".join(output_lines[-10:])
-            friendly = format_ytdlp_age_or_cookie_error(tail, self._settings)
+            friendly = option_error(tail, self._settings.ytdlp_extra_args) or (
+                format_ytdlp_age_or_cookie_error(tail, self._settings)
+            )
             if friendly:
                 raise DownloadError(friendly)
             raise DownloadError(f"yt-dlp failed (exit code {returncode}): {tail}")
 
         audio_path = self._latest_output_file()
         if audio_path is None:
-            raise DownloadError("Downloaded file not found after yt-dlp completed")
+            hint = " Check Extra yt-dlp options in Settings." if self._settings.ytdlp_extra_args.strip() else ""
+            raise DownloadError(
+                "yt-dlp finished without creating an MP3 audio file." + hint
+                + " See the download log for details."
+            )
 
         if self._progress_callback:
             self._progress_callback(100, "Download complete, processing...")

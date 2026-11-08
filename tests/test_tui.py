@@ -126,7 +126,7 @@ def fake_video(monkeypatch):
         return make_video()
 
     monkeypatch.setattr(app_module, "fetch_video_info", fetch)
-    fake_path(monkeypatch, {"ffmpeg", "ffprobe"})
+    fake_path(monkeypatch, {"ffmpeg", "ffprobe", "yt-dlp"})
     monkeypatch.setattr(app_module, "URL_DEBOUNCE_SECONDS", 0.01)
     return calls
 

@@ -50,17 +50,21 @@ uses tools on PATH or paths set in Settings, and says so when FFmpeg is missing.
 
 The download starts automatically at start-up, and again after Settings change
 if a tool became needed. A banner shows progress with Cancel; after a cancel or a
-failure it offers Download or Retry. Start is blocked only while FFmpeg (or yt-dlp
-in external mode) is missing.
+failure it offers Download or Retry. Start is blocked only while FFmpeg or yt-dlp
+is missing.
+
+If a URL is entered before the first yt-dlp download finishes, its preview waits
+for yt-dlp and loads automatically once it is available. Changing or clearing
+the URL while waiting keeps the preview attached to the current input.
 
 ## Lookup order and yt-dlp flags
 
 `AppSettings` resolves each tool as: a path set in Settings, then the downloaded
-copy, then PATH. Once the downloaded yt-dlp exists, external yt-dlp mode becomes
-the default; an explicit choice in Settings is kept.
+copy, then PATH. yt-dlp always runs as an external program; the app does not
+import the yt-dlp Python package.
 
 Every yt-dlp run gets `--ffmpeg-location <resolved FFmpeg>` and, when Deno was
-downloaded, `--js-runtimes deno:<path>` (or the equivalent library options).
+downloaded, `--js-runtimes deno:<path>`.
 `--js-runtimes` is left out for a yt-dlp path set in Settings, because yt-dlp
 versions before 2025.11 reject it; such a yt-dlp finds only a Deno on PATH.
 Whoever brings their own yt-dlp manages its JS runtime.
@@ -72,17 +76,22 @@ executable, and `yt-dlp.conf` in the current folder. Options there such as `-o`,
 `--download-archive` or `--quiet` would break how the app finds the file and
 reads progress. The downloaded yt-dlp therefore runs with `--ignore-config`. A
 yt-dlp path set in Settings reads its config files, for the same reason as above.
-Library mode never reads them.
 
 Settings → Extra yt-dlp options holds options for every run, such as
 `--proxy`, `--limit-rate`, `--cookies` or `--extractor-args`. The text is split
 like a shell command line, but backslashes are kept as typed so Windows paths
-work; quote values that contain spaces. `core/ytdlp_extra_args.py` checks it with
-yt-dlp's own parser, which also turns it into YoutubeDL options for library mode.
-Saving is refused, with the reason, for unknown options, video URLs, and options
+work; quote values that contain spaces. `core/ytdlp_extra_args.py` checks it
+without yt-dlp: saving is refused, with the reason, for video URLs and options
 that change where files go, their format, post-processing or what yt-dlp prints.
-FFmpeg and browser cookies have their own settings. In external mode the options
-go right after the executable, so the app's own arguments, which follow, win.
+FFmpeg and browser cookies have their own settings. Unknown options and missing
+values are caught by yt-dlp when it runs, and shown as "Extra yt-dlp options:
+<yt-dlp's reason>". The options go right after the executable, so the app's own
+arguments, which follow, win.
+
+If yt-dlp completes without producing audio, the app reports that no MP3 was
+created and points to the download log. Invalid metadata output is reported as
+missing valid video information. Both errors suggest checking Extra yt-dlp
+options when any are set.
 
 ## Checks
 

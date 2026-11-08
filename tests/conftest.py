@@ -41,12 +41,12 @@ def app_settings(settings_store):
 
 
 @pytest.fixture
-def ffmpeg_available(monkeypatch):
-    fake_path(monkeypatch, {"ffmpeg", "ffprobe"})
+def tools_on_path(monkeypatch):
+    fake_path(monkeypatch, {"ffmpeg", "ffprobe", "yt-dlp"})
 
 
 @pytest.fixture
-def fake_video(monkeypatch, ffmpeg_available):
+def fake_video(monkeypatch, tools_on_path):
     calls = []
 
     def fetch(url, settings=None, comment_limit=0):
@@ -58,7 +58,7 @@ def fake_video(monkeypatch, ffmpeg_available):
 
 
 @pytest.fixture
-def gated_fetch(monkeypatch, ffmpeg_available):
+def gated_fetch(monkeypatch, tools_on_path):
     fetch = GatedFetch()
     monkeypatch.setattr(video_worker_module, "fetch_video_info", fetch)
     yield fetch

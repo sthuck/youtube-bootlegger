@@ -24,20 +24,18 @@ or new library is needed.
 - If a fetch with comments fails, it retries once without comments, so a
   comment problem never loses the preview. The UI can't yet tell "no
   comments" from "comments failed".
-- `scripts/probe_video_track_sources.py URL [--comments N] [--external yt-dlp]`
+- `scripts/probe_video_track_sources.py URL [--comments N] [--ytdlp EXECUTABLE]`
   prints all three as JSON, for checking real videos.
 
 Behaviour worth knowing:
 
 - Comments are top-level only, in YouTube's **Top** order as returned, not
-  re-sorted by likes. Top ranking is dynamic: repeated requests, or library vs.
-  external mode, can return different comments. `limit` is a maximum.
+  re-sorted by likes. Top ranking is dynamic: repeated requests can return
+  different comments. `limit` is a maximum.
 - yt-dlp derives chapters from player data or, failing that, timestamps in the
   description, so chapter names may be intros or talk segments, not songs,
   and are sometimes simply wrong. That's why they go through the AI too.
-- Fetches with comments have a 120 s deadline in external mode (plus the
-  30 s retry); in library mode the socket timeout and retry limits bound each
-  request, not the total time.
+- Fetches with comments have a 120 s deadline (plus the 30 s retry).
   YouTube bot checks and extractor changes can still block retrieval.
 
 ## Agreed user flow
