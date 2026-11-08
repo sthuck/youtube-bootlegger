@@ -21,6 +21,8 @@ from typing import BinaryIO
 
 from PySide6.QtCore import QLockFile
 
+from ..utils.https import create_https_context
+
 from .cancellation import CancelToken
 from .exceptions import ToolInstallError
 from .tool_manifest import ToolAsset
@@ -47,7 +49,9 @@ class InstallProgress:
 
 def urlopen_get(url: str) -> AbstractContextManager[BinaryIO]:
     request = urllib.request.Request(url, headers={"User-Agent": "YouTubeBootlegger"})
-    return urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_SECONDS)
+    return urllib.request.urlopen(
+        request, timeout=HTTP_TIMEOUT_SECONDS, context=create_https_context(),
+    )
 
 
 def install_tools(

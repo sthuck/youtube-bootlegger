@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from urllib.parse import urlparse
 
+from ..utils.https import create_https_context
 from .exceptions import ValidationError
 from .settings import AppSettings, get_settings
 from .ytdlp_metadata import fetch_info_dict
@@ -227,7 +228,9 @@ def _url_exists(url: str) -> bool:
     """Return True if a HEAD request for the URL succeeds."""
     request = urllib.request.Request(url, method="HEAD")
     try:
-        with urllib.request.urlopen(request, timeout=THUMBNAIL_PROBE_TIMEOUT_SECONDS) as response:
+        with urllib.request.urlopen(
+            request, timeout=THUMBNAIL_PROBE_TIMEOUT_SECONDS, context=create_https_context(),
+        ) as response:
             return response.status == 200
     except OSError:
         return False

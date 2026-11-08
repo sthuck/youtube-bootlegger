@@ -57,6 +57,10 @@ and CA certificates. The TUI also includes Textual's syntax-highlighting data
 and textual-image's fallback pictures. CI checks the completed executable for
 these data files before packaging, including byte-for-byte comparisons with
 the source assets. Runtime tools remain separate first-run downloads.
+Python HTTPS downloads explicitly load the bundled certificate roots in
+addition to system/configured roots, so macOS builds don't depend on
+certificate paths from the build machine. Certificate and hostname validation
+remain enabled.
 
 `pysidedeploy.spec` remains available for optional QML builds with Nuitka. If
 using it in CI, persist `NUITKA_CACHE_DIR` between runs and install `ccache` on

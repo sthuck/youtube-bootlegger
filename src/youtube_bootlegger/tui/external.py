@@ -9,6 +9,8 @@ import urllib.request
 
 from PIL import Image as PILImage
 
+from ..utils.https import create_https_context
+
 THUMBNAIL_TIMEOUT_SECONDS = 10
 
 
@@ -65,7 +67,9 @@ def fetch_thumbnail(url: str) -> PILImage.Image:
     Raises:
         OSError: On network or decode failure.
     """
-    with urllib.request.urlopen(url, timeout=THUMBNAIL_TIMEOUT_SECONDS) as response:
+    with urllib.request.urlopen(
+        url, timeout=THUMBNAIL_TIMEOUT_SECONDS, context=create_https_context(),
+    ) as response:
         data = response.read()
     image = PILImage.open(io.BytesIO(data))
     image.load()

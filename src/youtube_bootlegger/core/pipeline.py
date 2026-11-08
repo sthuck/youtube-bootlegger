@@ -6,6 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ..models import DownloadJob
+from ..utils.https import create_https_context
 from .cancellation import CancelToken
 from .downloader import AudioDownloader
 from .exceptions import OperationCancelledError
@@ -233,7 +234,7 @@ class DownloadSplitPipeline:
             Tuple of (image_data, mime_type).
         """
         try:
-            with urllib.request.urlopen(url, timeout=10) as response:
+            with urllib.request.urlopen(url, timeout=10, context=create_https_context()) as response:
                 data = response.read()
                 content_type = response.headers.get("Content-Type", "image/jpeg")
                 return data, content_type
