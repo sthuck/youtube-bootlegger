@@ -102,7 +102,7 @@ class BootleggerApp(App[None]):
     """Download a YouTube live set and split it into tagged tracks."""
 
     TITLE = "YouTube Bootlegger"
-    CSS_PATH = "app.tcss"
+    CSS_PATH = Path(__file__).resolve().with_name("app.tcss")
 
     BINDINGS = [
         Binding("f1", "help", "Help"),

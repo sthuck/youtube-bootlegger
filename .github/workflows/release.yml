@@ -47,10 +47,12 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev --locked
 
-      # Folder bundles avoid C compilation and onefile compression/extraction.
-      # Each frontend has its own console mode and dependency collection.
+      # Each frontend has its own console mode and embedded assets.
       - name: Build executable
         run: uv run --no-sync pyinstaller --noconfirm main.spec -- --ui ${{ matrix.ui }}
+
+      - name: Verify embedded assets
+        run: uv run --no-sync python scripts/verify_bundle.py --ui ${{ matrix.ui }}
 
       - name: Package artifact
         env:
@@ -68,6 +70,7 @@ jobs:
           name: ${{ matrix.ui }}-${{ matrix.target.platform }}
           path: dist/release/*
           if-no-files-found: error
+          compression-level: 0
 
   publish:
     name: Publish six release assets
